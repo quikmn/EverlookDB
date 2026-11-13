@@ -1,0 +1,5 @@
+package-as: QuarryScout
+
+ignore:
+  - README.md
+  - .github

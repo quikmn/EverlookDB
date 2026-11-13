@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: Quarry Scout
+## Notes: Notes loot, vendors, quests and where NPCs and nodes are while you play, for the Quarry website. Saves nothing about you. /qs
+## Author: quikmn
+## Version: @project-version@
+## SavedVariables: QuarryScoutDB
+## IconTexture: Interface\Icons\INV_Misc_Spyglass_02
+
+QuarryScout.lua
