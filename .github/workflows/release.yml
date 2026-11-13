@@ -1,4 +1,4 @@
-# Push a tag like v1.0.0 and this builds EverlookScout-v1.0.0.zip and a GitHub release.
+# Push a tag like v1.0.0 and this builds EverlookDB-v1.0.0.zip and a GitHub release.
 # WowUp (and other GitHub-aware addon managers) install and update from those releases.
 name: Release
 

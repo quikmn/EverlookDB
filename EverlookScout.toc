@@ -1,9 +1,0 @@
-## Interface: 16001
-## Title: Everlook Scout
-## Notes: Notes loot, vendors, quests and where NPCs and nodes are while you play, for the Everlook website. Saves nothing about you. /els
-## Author: quikmn
-## Version: @project-version@
-## SavedVariables: EverlookScoutDB
-## IconTexture: Interface\Icons\INV_Misc_Spyglass_02
-
-EverlookScout.lua

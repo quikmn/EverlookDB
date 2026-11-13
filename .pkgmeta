@@ -1,4 +1,4 @@
-package-as: EverlookScout
+package-as: EverlookDB
 
 ignore:
   - README.md

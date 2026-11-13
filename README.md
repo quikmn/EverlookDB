@@ -1,6 +1,6 @@
-# Everlook Scout
+# EverlookDB
 
-A World of Warcraft: Forever addon that notes what you see while you play, so the Everlook website can show where things are and what drops from what. It runs quietly in the background. There are no windows and nothing to set up.
+A World of Warcraft: Forever addon that notes what you see while you play, so EverlookDB.com can show where things are and what drops from what. It runs quietly in the background. There are no windows and nothing to set up.
 
 ## What it records
 
@@ -15,17 +15,17 @@ Your character, realm or account name, other players, chat, your gear or bags. Y
 
 ## Commands
 
-- `/els`: what has been recorded so far
-- `/els pause` / `/els resume`: stop and restart recording
+- `/edb`: what has been recorded so far
+- `/edb pause` / `/edb resume`: stop and restart recording
 
 ## Sharing what you recorded
 
-Log out (or `/reload`) so the game writes the file, then upload this file on the Everlook website:
+Log out (or `/reload`) so the game writes the file, then upload this file on EverlookDB.com:
 
-`World of Warcraft\_forever_\WTF\Account\<your account>\SavedVariables\EverlookScout.lua`
+`World of Warcraft\_forever_\WTF\Account\<your account>\SavedVariables\EverlookDB.lua`
 
 ## Install
 
 With WowUp: *Get Addons* > *Install from URL* > paste this repository's GitHub URL. WowUp keeps it updated.
 
-By hand: download the latest `EverlookScout-*.zip` from Releases and unzip it into `World of Warcraft\_forever_\Interface\AddOns\`.
+By hand: download the latest `EverlookDB-*.zip` from Releases and unzip it into `World of Warcraft\_forever_\Interface\AddOns\`.
