@@ -476,6 +476,7 @@ end)
 -- (when the player is waiting anyway) offer a one-click save if a lot is unsaved.
 
 local function save()
+  if db then db.savingAt = time() end  -- read back after the reload to confirm the save in chat
   if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end
 end
 
@@ -505,6 +506,12 @@ local handlers = {
   PLAYER_LOGIN = function()
     init()
     loginAt = GetTime()
+    if db.savingAt and time() - db.savingAt < 120 then
+      C_Timer.After(2, function()
+        print("|cffffd200EverlookDB|r data saved. Thanks! /edb to see what's recorded so far.")
+      end)
+    end
+    db.savingAt = nil
     C_Timer.NewTicker(1, scanNameplates)
   end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
