@@ -2,7 +2,7 @@
 ## Title: EverlookDB
 ## Notes: Notes loot, vendors, quests and where NPCs and nodes are while you play, for EverlookDB.com. Saves nothing about you. /edb
 ## Author: quikmn
-## Version: @project-version@
+## Version: v0.1.0
 ## SavedVariables: EverlookDBData
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_02
 

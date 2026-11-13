@@ -32,3 +32,7 @@ Log out (or `/reload`) so the game writes the file, then upload this file on Eve
 With WowUp: *Get Addons* > *Install from URL* > paste this repository's GitHub URL. WowUp keeps it updated.
 
 By hand: download the latest `EverlookDB-*.zip` from Releases and unzip it into `World of Warcraft\_forever_\Interface\AddOns\`.
+
+## License
+
+GPL-3.0-or-later (see LICENSE). Not affiliated with Blizzard Entertainment.
