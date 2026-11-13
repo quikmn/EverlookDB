@@ -1,11 +1,11 @@
--- Quarry Scout: notes what you see while you play, for the Quarry website.
+-- Everlook Scout: notes what you see while you play, for the Everlook website.
 --   loot     what each mob, skinned mob, pickpocketed mob, herb, ore vein, chest and fishing spot gave
 --   npcs     name, level, type, rare/elite, skinnable, and where they stand (only when you are next to them)
 --   vendors  what each vendor sells, for how much, and whether stock is limited
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
--- Everything goes into SavedVariables (QuarryScout.lua); upload that file on the Quarry website.
--- /qs for a summary, /qs pause to stop recording, /qs resume to start again.
+-- Everything goes into SavedVariables (EverlookScout.lua); upload that file on the Everlook website.
+-- /els for a summary, /els pause to stop recording, /els resume to start again.
 
 local ADDON = ...
 local VERSION = 1
@@ -435,8 +435,8 @@ local function count(t)
 end
 
 local function init()
-  QuarryScoutDB = QuarryScoutDB or {}
-  db = QuarryScoutDB
+  EverlookScoutDB = EverlookScoutDB or {}
+  db = EverlookScoutDB
   db.format = VERSION
   db.locale = GetLocale()
   local version, build = GetBuildInfo()
@@ -501,21 +501,21 @@ f:SetScript("OnEvent", function(_, event, ...)
   handlers[event](...)
 end)
 
-SLASH_QUARRYSCOUT1 = "/qs"
-SLASH_QUARRYSCOUT2 = "/quarryscout"
-SlashCmdList.QUARRYSCOUT = function(msg)
+SLASH_EVERLOOKSCOUT1 = "/els"
+SLASH_EVERLOOKSCOUT2 = "/everlook"
+SlashCmdList.EVERLOOKSCOUT = function(msg)
   msg = (msg or ""):lower()
   if msg == "pause" then
     paused, db.paused = true, true
-    print("|cffffd200Quarry Scout|r paused. /qs resume to record again.")
+    print("|cffffd200Everlook Scout|r paused. /els resume to record again.")
   elseif msg == "resume" then
     paused, db.paused = false, false
-    print("|cffffd200Quarry Scout|r recording.")
+    print("|cffffd200Everlook Scout|r recording.")
   else
     local kills = 0
     for _, rec in pairs(db.loot) do kills = kills + rec.n end
-    print(string.format("|cffffd200Quarry Scout|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d quests.",
+    print(string.format("|cffffd200Everlook Scout|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d quests.",
       paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.quest)))
-    print("Upload WTF\\Account\\<account>\\SavedVariables\\QuarryScout.lua on the Quarry website. /qs pause, /qs resume.")
+    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookScout.lua on the Everlook website. /els pause, /els resume.")
   end
 end

@@ -1,4 +1,4 @@
-package-as: QuarryScout
+package-as: EverlookScout
 
 ignore:
   - README.md
