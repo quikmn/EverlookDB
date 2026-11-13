@@ -5,7 +5,7 @@
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
--- /edb for a summary, /edb pause to stop recording, /edb resume to start again.
+-- /edb for a summary, /edb save to write the file now (reloads the UI), /edb pause and /edb resume.
 
 local ADDON = ...
 local VERSION = 1
@@ -15,6 +15,8 @@ local NEAR = 3              -- CheckInteractDistance index: about 10 yards
 
 local db
 local paused = false
+local SAVE_REMINDER = 20 * 60   -- offer a save after a loading screen once this much play is unsaved
+local changes = 0               -- records touched since the last save (login or reload)
 
 -- Forever hides some values from addons ("secret values"). Treat any of them as unknown.
 local isSecret = issecretvalue or function() return false end
@@ -69,6 +71,7 @@ end
 -- add a position to rec.p[map] as a grid cell "x:y" -> times seen
 local function addSpot(rec, map, x, y)
   if not map then return end
+  changes = changes + 1
   rec.p = rec.p or {}
   local cells = rec.p[map]
   if not cells then cells = { n = 0 }; rec.p[map] = cells end
@@ -195,6 +198,7 @@ local function readLoot()
   local slots = GetNumLootItems() or 0
   if slots == 0 then return end
   lootDone = true
+  changes = changes + 1
 
   -- per source guid: items it gave
   local sources, order = {}, {}
@@ -321,6 +325,7 @@ local function readVendor()
     end
   end
   v.t = time()
+  changes = changes + 1
   return missing
 end
 
@@ -328,6 +333,7 @@ end
 -- Quests
 
 local function questRecord(qid)
+  changes = changes + 1
   local q = db.quest[qid]
   if not q then q = {}; db.quest[qid] = q end
   return q
@@ -465,10 +471,40 @@ GameTooltip:HookScript("OnShow", function(tip)
   if text and text ~= "" then lastObjectName, lastObjectAt = text, GetTime() end
 end)
 
+---------------------------------------------------------------------------------------------------
+-- Saving: the game writes SavedVariables only on logout or reload, so after a loading screen
+-- (when the player is waiting anyway) offer a one-click save if a lot is unsaved.
+
+local function save()
+  if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end
+end
+
+local saveButton
+local function offerSave()
+  if not saveButton then
+    saveButton = CreateFrame("Button", nil, UIParent, "UIPanelButtonTemplate")
+    saveButton:SetSize(220, 28)
+    saveButton:SetPoint("TOP", UIParent, "TOP", 0, -150)
+    saveButton:SetText("Save EverlookDB data")
+    saveButton:SetScript("OnClick", save)
+    saveButton:Hide()
+  end
+  saveButton:Show()
+  C_Timer.After(30, function() if saveButton then saveButton:Hide() end end)
+end
+
+local loginAt = 0
+local function afterLoadingScreen()
+  if paused or changes == 0 or InCombatLockdown() then return end
+  if GetTime() - loginAt < SAVE_REMINDER then return end
+  offerSave()
+end
+
 local f = CreateFrame("Frame")
 local handlers = {
   PLAYER_LOGIN = function()
     init()
+    loginAt = GetTime()
     C_Timer.NewTicker(1, scanNameplates)
   end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
@@ -477,6 +513,7 @@ local handlers = {
     if unit ~= "player" then return end
     lastCast, lastCastAt = spellName(spellID), GetTime()
   end,
+  LOADING_SCREEN_DISABLED = function() C_Timer.After(1, afterLoadingScreen) end,
   LOOT_READY = readLoot,
   LOOT_OPENED = readLoot,
   LOOT_CLOSED = lootClosed,
@@ -505,7 +542,9 @@ SLASH_EVERLOOKDB1 = "/edb"
 SLASH_EVERLOOKDB2 = "/everlookdb"
 SlashCmdList.EVERLOOKDB = function(msg)
   msg = (msg or ""):lower()
-  if msg == "pause" then
+  if msg == "save" then
+    save()
+  elseif msg == "pause" then
     paused, db.paused = true, true
     print("|cffffd200EverlookDB|r paused. /edb resume to record again.")
   elseif msg == "resume" then
@@ -516,6 +555,6 @@ SlashCmdList.EVERLOOKDB = function(msg)
     for _, rec in pairs(db.loot) do kills = kills + rec.n end
     print(string.format("|cffffd200EverlookDB|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d quests.",
       paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.quest)))
-    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb pause, /edb resume.")
+    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb save, /edb pause, /edb resume.")
   end
 end
