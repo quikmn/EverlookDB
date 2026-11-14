@@ -1,5 +1,5 @@
 # Push a tag like v1.0.0 and this builds EverlookDB-v1.0.0-forever.zip and a GitHub release, plus a copy named EverlookDB.zip
-# so https://github.com/quikmn/EverlookDB/releases/latest/download/EverlookDB.zip always gets the newest. WowUp uses release.json.
+# so https://github.com/quikmn/EverlookDB/releases/latest/download/EverlookDB.zip always gets the newest. WowUp uses release.json; the same zip goes to CurseForge.
 name: Release
 
 on:
@@ -25,3 +25,7 @@ jobs:
         run: |
           cp .release/EverlookDB-${GITHUB_REF_NAME}-forever.zip .release/EverlookDB.zip
           gh release upload "$GITHUB_REF_NAME" .release/EverlookDB.zip --clobber
+      - name: Upload to CurseForge (project 1804872, WoW Forever)
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+        run: bash .github/curseforge-upload.sh 1804872 .release/EverlookDB-${GITHUB_REF_NAME}-forever.zip EverlookDB.toc
