@@ -1,8 +1,10 @@
 -- EverlookDB: notes what you see while you play, for EverlookDB.com.
 --   loot     what each mob, skinned mob, pickpocketed mob, herb, ore vein, chest and fishing spot gave
---   npcs     name, level, type, rare/elite, skinnable, and where they stand (only when you are next to them)
+--   npcs     name, level, type, rare/elite, skinnable, max health, the zones they are in, where they stand (only
+--            when you are next to them), the XP a solo kill gave, and services (flight master, banker, trainer, ...)
+--   trainers what each trainer teaches, for how much, from which level
 --   vendors  what each vendor sells, for how much, and whether stock is limited
---   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
+--   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards, XP
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
 -- /edb for a summary, /edb save to write the file now (reloads the UI), /edb pause and /edb resume.
@@ -89,6 +91,7 @@ end
 -- NPCs
 
 local scanned = {}  -- npc ids whose tooltip was read this session
+local recent = {}   -- name -> { id, level, at }: NPCs seen lately, to match "X dies, you gain N experience"
 local SKINNABLE = {}
 for _, g in ipairs({ "UNIT_SKINNABLE_LEATHER", "UNIT_SKINNABLE_HERB", "UNIT_SKINNABLE_ROCK", "UNIT_SKINNABLE_BOLTS" }) do
   if _G[g] then SKINNABLE[_G[g]] = g:sub(16):lower() end  -- leather, herb, rock, bolts
@@ -114,6 +117,18 @@ local function readUnit(unit, near)
       rec.lo = math.min(rec.lo or lvl, lvl)
       rec.hi = math.max(rec.hi or lvl, lvl)
     end
+  end
+  if rec.name then recent[rec.name] = { id = id, lvl = lvl, at = GetTime() } end
+  local hp = ok(UnitHealthMax(unit))  -- hidden in some places; then unknown
+  if lvl and lvl > 0 and hp and hp > 0 then
+    rec.hp = rec.hp or {}
+    rec.hp[lvl] = math.max(rec.hp[lvl] or 0, hp)
+  end
+  -- every zone it shows up in, even without a position (nameplates reach further than "near")
+  local zone = where()
+  if zone then
+    rec.z = rec.z or {}
+    if not rec.z[zone] then rec.z[zone] = 1; changes = changes + 1 end
   end
   rec.class = ok(UnitClassification(unit)) or rec.class      -- normal, elite, rare, rareelite, worldboss
   rec.type = ok(UnitCreatureType(unit)) or rec.type          -- Beast, Humanoid, ... (client language)
@@ -427,6 +442,74 @@ local function questComplete()
 end
 
 ---------------------------------------------------------------------------------------------------
+-- Services and trainers: what an NPC does when you talk to it
+
+local function service(name)
+  if paused then return end
+  local kind, id = parseGUID(UnitGUID("npc"))
+  if kind ~= "u" then return end
+  local rec = readUnit("npc", true) or npcRecord(id)
+  rec.svc = rec.svc or {}
+  if not rec.svc[name] then rec.svc[name] = 1; changes = changes + 1 end
+  return id
+end
+
+local function readTrainer()
+  local id = service("train")
+  if not id then return end
+  local t = db.trainer[id] or {}
+  db.trainer[id] = t
+  t.s = t.s or {}
+  for i = 1, (safe(GetNumTrainerServices) or 0) do
+    local name, sub, kind = safe(GetTrainerServiceInfo, i)
+    if name and kind ~= "header" then
+      local tip = C_TooltipInfo and C_TooltipInfo.GetTrainerService and safe(C_TooltipInfo.GetTrainerService, i)
+      local spell = tip and ok(tip.id)
+      local key = spell or (sub and sub ~= "" and (name .. " (" .. sub .. ")") or name)
+      t.s[key] = { c = safe(GetTrainerServiceCost, i), l = safe(GetTrainerServiceLevelReq, i) }
+    end
+  end
+  t.t = time()
+  changes = changes + 1
+end
+
+---------------------------------------------------------------------------------------------------
+-- XP from kills: "Boar dies, you gain 85 experience." (solo only, so it is the mob's own XP)
+
+local function toPattern(fmt)
+  if type(fmt) ~= "string" then return nil end
+  -- escape magic characters, then %s / %1$s -> (.-) and %d / %2$d -> (%d+)
+  local p = fmt:gsub("([%(%)%.%[%]%*%+%-%?%^%$])", "%%%1")
+  p = p:gsub("%%%d?%%?%$?s", "(.-)"):gsub("%%%d?%%?%$?d", "(%%d+)")
+  return "^" .. p .. "$"
+end
+local XP_PLAIN = toPattern(_G.COMBATLOG_XPGAIN_FIRSTPERSON)     -- %s dies, you gain %d experience.
+local XP_RESTED = toPattern(_G.COMBATLOG_XPGAIN_EXHAUSTION1)    -- ... (%s exp %s bonus)
+
+local function readKillXP(text)
+  text = ok(text)
+  if paused or not text or not XP_PLAIN or IsInGroup() then return end
+  local name, xp = text:match(XP_PLAIN)
+  local bonus
+  if not name and XP_RESTED then
+    local b
+    name, xp, b = text:match(XP_RESTED)
+    bonus = tonumber(b)
+  end
+  xp = tonumber(xp)
+  local seen = name and recent[name]
+  if not xp or not seen or GetTime() - seen.at > 60 or not seen.lvl or seen.lvl < 1 then return end
+  local pl = ok(UnitLevel("player"))
+  if not pl then return end
+  xp = xp - (bonus or 0)
+  if xp <= 0 then return end
+  local rec = npcRecord(seen.id)
+  rec.xp = rec.xp or {}
+  rec.xp[pl .. ":" .. seen.lvl] = xp   -- player level : mob level -> XP
+  changes = changes + 1
+end
+
+---------------------------------------------------------------------------------------------------
 -- Setup
 
 local function spellName(id)
@@ -451,6 +534,7 @@ local function init()
   db.since = db.since or time()
   db.npc, db.loot, db.obj = db.npc or {}, db.loot or {}, db.obj or {}
   db.vendor, db.quest = db.vendor or {}, db.quest or {}
+  db.trainer = db.trainer or {}
   paused = db.paused or false
 
   for kind, ids in pairs(GATHER_SPELLS) do
@@ -528,6 +612,13 @@ local handlers = {
     if readVendor() and not paused then C_Timer.After(1.5, readVendor) end  -- uncached items arrive later
   end,
   GOSSIP_SHOW = function() readUnit("npc", true) end,
+  TRAINER_SHOW = function() C_Timer.After(0.5, readTrainer) end,   -- the list fills in a moment later
+  TAXIMAP_OPENED = function() service("taxi") end,
+  BANKFRAME_OPENED = function() service("bank") end,
+  AUCTION_HOUSE_SHOW = function() service("ah") end,
+  PET_STABLE_SHOW = function() service("stable") end,
+  CONFIRM_BINDER = function() service("inn") end,
+  CHAT_MSG_COMBAT_XP_GAIN = readKillXP,
   QUEST_DETAIL = questDetail,
   QUEST_ACCEPTED = function(a, b) questAccepted(b or a) end,  -- (questID) or (logIndex, questID)
   QUEST_PROGRESS = questProgress,
@@ -536,6 +627,11 @@ local handlers = {
     if paused or not qid then return end
     local q = questRecord(qid)
     q.done = (q.done or 0) + 1
+    local pl = ok(UnitLevel("player"))
+    if pl and xp and xp > 0 then
+      q.xp = q.xp or {}
+      q.xp[pl] = xp   -- player level -> XP (quests give less when you outlevel them)
+    end
     if money and money > 0 then q.money = money end
   end,
 }
@@ -560,8 +656,8 @@ SlashCmdList.EVERLOOKDB = function(msg)
   else
     local kills = 0
     for _, rec in pairs(db.loot) do kills = kills + rec.n end
-    print(string.format("|cffffd200EverlookDB|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d quests.",
-      paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.quest)))
+    print(string.format("|cffffd200EverlookDB|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests.",
+      paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.trainer), count(db.quest)))
     print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb save, /edb pause, /edb resume.")
   end
 end
