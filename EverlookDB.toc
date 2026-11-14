@@ -4,6 +4,6 @@
 ## Author: quikmn
 ## Version: v0.1.1
 ## SavedVariables: EverlookDBData
-## IconTexture: Interface\Icons\INV_Misc_Spyglass_02
+## IconTexture: Interface\AddOns\EverlookDB\Media\icon
 
 EverlookDB.lua
