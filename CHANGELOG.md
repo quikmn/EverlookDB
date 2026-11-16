@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Quest text that holds your character's name (the game fills it in for some quests) is no longer saved, and neither is a quest's objective paragraph; what older versions saved of it is removed from your data file. The site shows the quest texts from the game data instead.
 - `/edb feedback` shows a link for reporting bugs and ideas.
 
 ## v0.1.3 (2026-11-14)

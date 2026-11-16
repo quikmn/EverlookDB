@@ -347,6 +347,14 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Quests
 
+-- Quest text the game shows can carry your character's name (it fills in $N), so text that holds it is
+-- never saved, and the objective paragraph isn't saved at all (the site has the quest texts already).
+local function noName(text)
+  local me = ok(UnitName("player"))
+  if text and me and me ~= "" and text:find(me, 1, true) then return nil end
+  return text
+end
+
 local function questRecord(qid)
   changes = changes + 1
   local q = db.quest[qid]
@@ -388,8 +396,7 @@ local function questDetail(startItem)
   local qid = ok(GetQuestID())
   if not qid or qid == 0 then return end
   local q = questRecord(qid)
-  q.title = ok(GetTitleText()) or q.title
-  q.objective = ok(GetObjectiveText()) or q.objective
+  q.title = noName(ok(GetTitleText())) or q.title
   q.from = questParty(startItem) or q.from
   local map, x, y = where()
   if map and x then q.fromAt = map .. ":" .. x .. ":" .. y end
@@ -405,7 +412,7 @@ local function questAccepted(qid)
   local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
   local info = idx and safe(C_QuestLog.GetInfo, idx)
   if info then
-    q.title = ok(info.title) or q.title
+    q.title = noName(ok(info.title)) or q.title
     q.level = ok(info.level) or q.level
     q.group = ok(info.suggestedGroup) or q.group
   end
@@ -413,7 +420,7 @@ local function questAccepted(qid)
   if objectives and #objectives > 0 then
     local out = {}
     for _, o in ipairs(objectives) do
-      local text = ok(o.text)
+      local text = noName(ok(o.text))
       -- drop the player's progress ("3/10 ") so every upload reads the same
       if text then out[#out + 1] = (o.type or "") .. "|" .. (o.numRequired or "") .. "|" .. text:gsub("^%d+/%d+%s*", "") end
     end
@@ -534,6 +541,8 @@ local function init()
   db.since = db.since or time()
   db.npc, db.loot, db.obj = db.npc or {}, db.loot or {}, db.obj or {}
   db.vendor, db.quest = db.vendor or {}, db.quest or {}
+  -- older versions saved each quest's objective paragraph, which can hold your character's name: drop it
+  for _, q in pairs(db.quest) do q.objective = nil end
   db.trainer = db.trainer or {}
   paused = db.paused or false
 
