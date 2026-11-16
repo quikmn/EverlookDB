@@ -18,6 +18,7 @@ Your character, realm or account name, other players, chat, your gear or bags. Y
 - `/edb`: what has been recorded so far
 - `/edb save`: write the data file now (reloads the UI)
 - `/edb pause` / `/edb resume`: stop and restart recording
+- `/edb feedback`: a link for reporting bugs and ideas
 
 The game only writes addon data when you log out or reload. After a loading screen, if 20 minutes or more are unsaved, a small "Save EverlookDB data" button shows for 30 seconds.
 

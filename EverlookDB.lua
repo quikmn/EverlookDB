@@ -641,6 +641,34 @@ f:SetScript("OnEvent", function(_, event, ...)
   handlers[event](...)
 end)
 
+-- Feedback link. Addons can't open a browser, so show the link selected in a box to copy.
+local FEEDBACK_URL = "https://github.com/quikmn/EverlookDB/issues"
+StaticPopupDialogs["EVERLOOKDB_FEEDBACK"] = {
+  text = "Report a bug or suggest an idea.\nPress Ctrl+C to copy the link, then paste it in your browser.",
+  button1 = CLOSE or "Close",
+  hasEditBox = true,
+  editBoxWidth = 320,
+  OnShow = function(self)
+    local eb = self.EditBox or self.editBox
+    if not eb then return end
+    eb:SetText(FEEDBACK_URL)
+    eb:SetFocus()
+    eb:HighlightText()
+  end,
+  EditBoxOnTextChanged = function(eb)
+    if eb:GetText() ~= FEEDBACK_URL then
+      eb:SetText(FEEDBACK_URL)
+      eb:HighlightText()
+    end
+  end,
+  EditBoxOnEnterPressed = function() StaticPopup_Hide("EVERLOOKDB_FEEDBACK") end,
+  EditBoxOnEscapePressed = function() StaticPopup_Hide("EVERLOOKDB_FEEDBACK") end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 SLASH_EVERLOOKDB1 = "/edb"
 SLASH_EVERLOOKDB2 = "/everlookdb"
 SlashCmdList.EVERLOOKDB = function(msg)
@@ -653,11 +681,13 @@ SlashCmdList.EVERLOOKDB = function(msg)
   elseif msg == "resume" then
     paused, db.paused = false, false
     print("|cffffd200EverlookDB|r recording.")
+  elseif msg == "feedback" or msg == "bug" then
+    StaticPopup_Show("EVERLOOKDB_FEEDBACK")
   else
     local kills = 0
     for _, rec in pairs(db.loot) do kills = kills + rec.n end
     print(string.format("|cffffd200EverlookDB|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests.",
       paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.trainer), count(db.quest)))
-    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb save, /edb pause, /edb resume.")
+    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb save, /edb pause, /edb resume, /edb feedback.")
   end
 end

@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- `/edb feedback` shows a link for reporting bugs and ideas.
+
 ## v0.1.3 (2026-11-14)
 
 - Notes more for EverlookDB.com: the XP from kills (when you play solo) and from quests, which NPCs are flight masters, bankers, auctioneers, stable masters, innkeepers or trainers, which spells each trainer teaches, every zone an NPC is seen in, and NPC health per level.
