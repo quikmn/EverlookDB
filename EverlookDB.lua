@@ -554,13 +554,20 @@ local function init()
   end
 end
 
--- the world-object tooltip ("Peacebloom", "Copper Vein", "Battered Chest") names the next looted object
+-- the world-object tooltip ("Peacebloom", "Copper Vein", "Battered Chest") names the next looted object;
+-- a player's corpse ("Corpse of <name>", the game's CORPSE_TOOLTIP) is never taken as one, nor your own name
+local corpseBefore, corpseAfter = (type(CORPSE_TOOLTIP) == "string" and CORPSE_TOOLTIP or ""):match("^(.-)%%s(.*)$")
+local function isCorpse(text)
+  return corpseBefore ~= nil and #text > #corpseBefore + #corpseAfter
+    and text:sub(1, #corpseBefore) == corpseBefore and text:sub(#text - #corpseAfter + 1) == corpseAfter
+end
 GameTooltip:HookScript("OnShow", function(tip)
   if tip:GetOwner() ~= UIParent then return end
   if tip.GetUnit and tip:GetUnit() then return end
   if tip.GetItem and tip:GetItem() then return end
   local line = _G.GameTooltipTextLeft1
-  local text = line and ok(line:GetText())
+  local text = noName(line and ok(line:GetText()))
+  if text and isCorpse(text) then text = nil end
   if text and text ~= "" then lastObjectName, lastObjectAt = text, GetTime() end
 end)
 
