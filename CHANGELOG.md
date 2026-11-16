@@ -1,15 +1,19 @@
-# EverlookDB
+# EverlookDB Collector
 
-## [v0.1.0](https://github.com/quikmn/EverlookDB/tree/v0.1.0) (2026-11-13)
-[Full Changelog](https://github.com/quikmn/EverlookDB/commits/v0.1.0) [Previous Releases](https://github.com/quikmn/EverlookDB/releases)
+## v0.1.3 (2026-11-14)
 
-- Confirm in chat after /edb save  
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>  
-- Save: /edb save, and a one-click save button after loading screens when 20+ minutes are unsaved  
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>  
-- Rename to EverlookDB (/edb)  
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>  
-- Rename to Everlook Scout (/els)  
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>  
-- Quarry Scout 0.1: record loot, NPCs, vendors and quests for Quarry  
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>  
+- Notes more for EverlookDB.com: the XP from kills (when you play solo) and from quests, which NPCs are flight masters, bankers, auctioneers, stable masters, innkeepers or trainers, which spells each trainer teaches, every zone an NPC is seen in, and NPC health per level.
+
+## v0.1.2 (2026-11-14)
+
+- Its own icon in the addon list: the EverlookDB mark.
+
+## v0.1.1 (2026-11-14)
+
+- Now shown as EverlookDB Collector. The folder and your saved data are unchanged.
+- Licensed GPL-3.0-or-later.
+
+## v0.1.0 (2026-11-13)
+
+- First release. Notes loot, vendors, quests and where NPCs and nodes are while you play, for EverlookDB.com. It saves nothing about you or your character.
+- `/edb save` saves what's been noted so far. After a loading screen, if more than 20 minutes are unsaved, a button offers to save in one click.
