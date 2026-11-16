@@ -7,18 +7,42 @@
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards, XP
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
--- /edb for a summary, /edb save to write the file now (reloads the UI), /edb pause and /edb resume.
+-- /edb opens the window (what's recorded, saving, privacy, options); /edb help lists the commands.
+-- The player's own settings live in EverlookDBSettings, never in EverlookDBData (the site reads only that).
 
-local ADDON = ...
+local ADDON, ns = ...
 local VERSION = 1
+-- These three shape the data every player uploads, so they are not options.
 local SPAWN_GRID = 5        -- positions are kept on a 0.5% grid of the zone map
 local SPAWNS_PER_MAP = 150  -- most grid cells kept per NPC or node per map
 local NEAR = 3              -- CheckInteractDistance index: about 10 yards
 
 local db
+local settings              -- EverlookDBSettings
 local paused = false
-local SAVE_REMINDER = 20 * 60   -- offer a save after a loading screen once this much play is unsaved
 local changes = 0               -- records touched since the last save (login or reload)
+
+ns.SETTINGS_DEFAULTS = {
+  version = 1,
+  paused = false,
+  saveReminder = true,      -- after a loading screen, offer a one-click save when a lot is unsaved
+  reminderMinutes = 20,     -- ... once this much play is unsaved
+  savedMessage = true,      -- "data saved" in chat after a save
+}
+
+-- Settings from the saved table, missing ones from the defaults; moves `paused` out of the data file.
+function ns.InitSettings(data)
+  local s = type(EverlookDBSettings) == "table" and EverlookDBSettings or {}
+  EverlookDBSettings = s
+  for k, v in pairs(ns.SETTINGS_DEFAULTS) do
+    if s[k] == nil then s[k] = v end
+  end
+  if data and data.paused ~= nil then
+    if data.paused then s.paused = true end
+    data.paused = nil
+  end
+  return s
+end
 
 -- Forever hides some values from addons ("secret values"). Treat any of them as unknown.
 local isSecret = issecretvalue or function() return false end
@@ -544,7 +568,8 @@ local function init()
   -- older versions saved each quest's objective paragraph, which can hold your character's name: drop it
   for _, q in pairs(db.quest) do q.objective = nil end
   db.trainer = db.trainer or {}
-  paused = db.paused or false
+  settings = ns.InitSettings(db)
+  paused = settings.paused and true or false
 
   for kind, ids in pairs(GATHER_SPELLS) do
     for _, id in ipairs(ids) do
@@ -576,9 +601,10 @@ end)
 -- (when the player is waiting anyway) offer a one-click save if a lot is unsaved.
 
 local function save()
-  if db then db.savingAt = time() end  -- read back after the reload to confirm the save in chat
+  if settings then settings.savingAt = time() end  -- read back after the reload to confirm the save
   if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end
 end
+ns.Save = save
 
 local saveButton
 local function offerSave()
@@ -596,8 +622,8 @@ end
 
 local loginAt = 0
 local function afterLoadingScreen()
-  if paused or changes == 0 or InCombatLockdown() then return end
-  if GetTime() - loginAt < SAVE_REMINDER then return end
+  if paused or changes == 0 or InCombatLockdown() or not settings.saveReminder then return end
+  if GetTime() - loginAt < (settings.reminderMinutes or 20) * 60 then return end
   offerSave()
 end
 
@@ -606,12 +632,16 @@ local handlers = {
   PLAYER_LOGIN = function()
     init()
     loginAt = GetTime()
-    if db.savingAt and time() - db.savingAt < 120 then
-      C_Timer.After(2, function()
-        print("|cffffd200EverlookDB|r data saved. Thanks! /edb to see what's recorded so far.")
-      end)
+    local savingAt = settings.savingAt or db.savingAt  -- older versions kept it in the data
+    if savingAt and time() - savingAt < 120 then
+      settings.lastSave = savingAt
+      if settings.savedMessage then
+        C_Timer.After(2, function()
+          print("|cffffd200EverlookDB|r data saved. Thanks! /edb to see what's recorded so far.")
+        end)
+      end
     end
-    db.savingAt = nil
+    db.savingAt, settings.savingAt = nil, nil
     C_Timer.NewTicker(1, scanNameplates)
   end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
@@ -657,53 +687,24 @@ f:SetScript("OnEvent", function(_, event, ...)
   handlers[event](...)
 end)
 
--- Feedback link. Addons can't open a browser, so show the link selected in a box to copy.
-local FEEDBACK_URL = "https://github.com/quikmn/EverlookDB/issues"
-StaticPopupDialogs["EVERLOOKDB_FEEDBACK"] = {
-  text = "Report a bug or suggest an idea.\nPress Ctrl+C to copy the link, then paste it in your browser.",
-  button1 = CLOSE or "Close",
-  hasEditBox = true,
-  editBoxWidth = 320,
-  OnShow = function(self)
-    local eb = self.EditBox or self.editBox
-    if not eb then return end
-    eb:SetText(FEEDBACK_URL)
-    eb:SetFocus()
-    eb:HighlightText()
-  end,
-  EditBoxOnTextChanged = function(eb)
-    if eb:GetText() ~= FEEDBACK_URL then
-      eb:SetText(FEEDBACK_URL)
-      eb:HighlightText()
-    end
-  end,
-  EditBoxOnEnterPressed = function() StaticPopup_Hide("EVERLOOKDB_FEEDBACK") end,
-  EditBoxOnEscapePressed = function() StaticPopup_Hide("EVERLOOKDB_FEEDBACK") end,
-  timeout = 0,
-  whileDead = true,
-  hideOnEscape = true,
-  preferredIndex = 3,
-}
+---------------------------------------------------------------------------------------------------
+-- What the window and chat commands need (Options.lua)
 
-SLASH_EVERLOOKDB1 = "/edb"
-SLASH_EVERLOOKDB2 = "/everlookdb"
-SlashCmdList.EVERLOOKDB = function(msg)
-  msg = (msg or ""):lower()
-  if msg == "save" then
-    save()
-  elseif msg == "pause" then
-    paused, db.paused = true, true
-    print("|cffffd200EverlookDB|r paused. /edb resume to record again.")
-  elseif msg == "resume" then
-    paused, db.paused = false, false
-    print("|cffffd200EverlookDB|r recording.")
-  elseif msg == "feedback" or msg == "bug" then
-    StaticPopup_Show("EVERLOOKDB_FEEDBACK")
-  else
-    local kills = 0
-    for _, rec in pairs(db.loot) do kills = kills + rec.n end
-    print(string.format("|cffffd200EverlookDB|r %s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests.",
-      paused and "paused" or "recording", count(db.npc), count(db.loot), kills, count(db.obj), count(db.vendor), count(db.trainer), count(db.quest)))
-    print("Upload WTF\\Account\\<account>\\SavedVariables\\EverlookDB.lua on EverlookDB.com. /edb save, /edb pause, /edb resume, /edb feedback.")
-  end
+-- Recording on or off (saved in EverlookDBSettings).
+function ns.SetPaused(on)
+  paused = on and true or false
+  if settings then settings.paused = paused end
 end
+function ns.IsPaused() return paused end
+
+-- Totals of what's recorded, and how much is unsaved since the last save (login or reload).
+function ns.Status()
+  local kills = 0
+  for _, rec in pairs(db.loot) do kills = kills + rec.n end
+  return {
+    npcs = count(db.npc), loot = count(db.loot), looted = kills, objects = count(db.obj),
+    vendors = count(db.vendor), trainers = count(db.trainer), quests = count(db.quest),
+    since = db.since, unsaved = changes, lastSave = settings.lastSave,
+  }
+end
+function ns.Ready() return db ~= nil end

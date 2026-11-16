@@ -3,3 +3,4 @@ package-as: EverlookDB
 ignore:
   - README.md
   - .github
+  - tests

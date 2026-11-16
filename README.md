@@ -1,6 +1,6 @@
 # EverlookDB
 
-A World of Warcraft: Forever addon that notes what you see while you play, so EverlookDB.com can show where things are and what drops from what. It runs quietly in the background. There are no windows and nothing to set up.
+A World of Warcraft: Forever addon that notes what you see while you play, so EverlookDB.com can show where things are and what drops from what. It runs quietly in the background; there is nothing to set up. `/edb` opens its window: what's recorded so far, saving and uploading, privacy and a few options.
 
 ## What it records
 
@@ -15,12 +15,14 @@ Your character, realm or account name, other players, chat, your gear or bags. Y
 
 ## Commands
 
-- `/edb`: what has been recorded so far
+- `/edb`: the window (also under Settings > AddOns)
+- `/edb status`: what has been recorded so far, in chat
 - `/edb save`: write the data file now (reloads the UI)
 - `/edb pause` / `/edb resume`: stop and restart recording
 - `/edb feedback`: a link for reporting bugs and ideas
+- `/edb reminderminutes 30` and the like: change a setting (`/edb settings` lists them, `/edb help` everything)
 
-The game only writes addon data when you log out or reload. After a loading screen, if 20 minutes or more are unsaved, a small "Save EverlookDB data" button shows for 30 seconds.
+The game only writes addon data when you log out or reload. After a loading screen, if 20 minutes or more are unsaved, a small "Save EverlookDB data" button shows for 30 seconds (both can be changed in the window).
 
 ## Sharing what you recorded
 
