@@ -20,16 +20,6 @@ ns.app = app
 local function S() return EverlookDBSettings end
 
 app:Setting({
-  key = "savereminder", type = "bool", label = "Offer a one-click save after a loading screen",
-  desc = "The game writes addon data only when you log out or reload. After a loading screen, when a lot is unsaved, a small \"Save EverlookDB data\" button shows for 30 seconds.",
-  get = function() return S().saveReminder end, set = function(v) S().saveReminder = v end,
-})
-app:Setting({
-  key = "reminderminutes", type = "number", label = "... once this many minutes of play are unsaved", chatLabel = "Save reminder after (minutes unsaved)", min = 5, max = 120, step = 5,
-  get = function() return S().reminderMinutes end, set = function(v) S().reminderMinutes = v end,
-  disabled = function() return not S().saveReminder end,
-})
-app:Setting({
   key = "savedmessage", type = "bool", label = "Say \"data saved\" in chat after a save",
   get = function() return S().savedMessage end, set = function(v) S().savedMessage = v end,
 })
@@ -102,17 +92,15 @@ app:Section("privacy", "Privacy", function(stack)
   UI.Note(stack, "Never recorded: your character, realm or account name, other players, chat, your gear or bags.")
   UI.Note(stack, "Quest text the game fills in with your character's name is never saved. A player's corpse or your own name is never taken as the name of something you loot.")
   UI.Note(stack, "Your level is used only to note the lowest level a quest was offered at and the XP a kill or quest gave at your level.")
-  UI.Note(stack, "Your settings for this window (pause, reminders, the window position) are kept apart from the recorded data; the site reads only the game facts.")
+  UI.Note(stack, "Your settings for this window (pause, the chat message, the window position) are kept apart from the recorded data; the site reads only the game facts.")
   UI.Note(stack, "Uploads are merged with other players' into drop rates and maps. EverlookDB doesn't keep the file itself or anything that identifies you. More on everlookdb.com/privacy.html.")
 end)
 
 app:Section("options", "Options", function(stack)
   UI.Header(stack, "Saving")
-  app:Widget(stack, "savereminder")
-  app:Widget(stack, "reminderminutes")
   app:Widget(stack, "savedmessage")
   UI.Header(stack, "Chat commands")
-  UI.Note(stack, "/edb  this window\n/edb save  write the data file now (reloads the UI)\n/edb pause, /edb resume\n/edb status  what's recorded, in chat\n/edb feedback  a link for bugs and ideas\n/edb reminderminutes 30  change a setting (/edb settings lists them)\n/edb help  all of this in chat")
+  UI.Note(stack, "/edb  this window\n/edb save  write the data file now (reloads the UI)\n/edb pause, /edb resume\n/edb status  what's recorded, in chat\n/edb feedback  a link for bugs and ideas\n/edb savedmessage off  change a setting (/edb settings lists them)\n/edb help  all of this in chat")
 end)
 
 SLASH_EVERLOOKDB1 = "/edb"

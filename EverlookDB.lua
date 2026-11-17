@@ -25,8 +25,6 @@ local changes = 0               -- records touched since the last save (login or
 ns.SETTINGS_DEFAULTS = {
   version = 1,
   paused = false,
-  saveReminder = true,      -- after a loading screen, offer a one-click save when a lot is unsaved
-  reminderMinutes = 20,     -- ... once this much play is unsaved
   savedMessage = true,      -- "data saved" in chat after a save
 }
 
@@ -597,8 +595,8 @@ GameTooltip:HookScript("OnShow", function(tip)
 end)
 
 ---------------------------------------------------------------------------------------------------
--- Saving: the game writes SavedVariables only on logout or reload, so after a loading screen
--- (when the player is waiting anyway) offer a one-click save if a lot is unsaved.
+-- Saving: the game writes SavedVariables only on logout or reload; /edb save (or the window's Save button)
+-- reloads to write them now. No pop-up offers it: it can't be dismissed and sits in the middle of the screen.
 
 local function save()
   if settings then settings.savingAt = time() end  -- read back after the reload to confirm the save
@@ -606,29 +604,7 @@ local function save()
 end
 ns.Save = save
 
-local saveButton
-local function offerSave()
-  if not saveButton then
-    saveButton = CreateFrame("Button", nil, UIParent, "UIPanelButtonTemplate")
-    saveButton:SetSize(220, 28)
-    saveButton:SetPoint("TOP", UIParent, "TOP", 0, -150)
-    saveButton:SetText("Save EverlookDB data")
-    saveButton:SetScript("OnClick", save)
-    saveButton:Hide()
-  end
-  saveButton:Show()
-  local shownAt = GetTime()
-  saveButton.shownAt = shownAt
-  -- hide 30 s after the latest offer (an earlier offer's timer must not cut a newer one short)
-  C_Timer.After(30, function() if saveButton and saveButton.shownAt == shownAt then saveButton:Hide() end end)
-end
-
 local loginAt = 0
-local function afterLoadingScreen()
-  if paused or changes == 0 or InCombatLockdown() or not settings.saveReminder then return end
-  if GetTime() - loginAt < (settings.reminderMinutes or 20) * 60 then return end
-  offerSave()
-end
 
 local f = CreateFrame("Frame")
 local handlers = {
@@ -653,7 +629,6 @@ local handlers = {
     if unit ~= "player" then return end
     lastCast, lastCastAt = spellName(spellID), GetTime()
   end,
-  LOADING_SCREEN_DISABLED = function() C_Timer.After(1, afterLoadingScreen) end,
   LOOT_READY = readLoot,
   LOOT_OPENED = readLoot,
   LOOT_CLOSED = lootClosed,
