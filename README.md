@@ -22,7 +22,7 @@ Your character, realm or account name, other players, chat, your gear or bags. Y
 - `/edb feedback`: a link for reporting bugs and ideas
 - `/edb savedmessage off` and the like: change a setting (`/edb settings` lists them, `/edb help` everything)
 
-The game only writes addon data when you log out or reload. After a loading screen, if 20 minutes or more are unsaved, a small "Save EverlookDB data" button shows for 30 seconds (both can be changed in the window).
+The game only writes addon data when you log out or reload. To write it now, use Save now in `/edb` or `/edb save` (it reloads the UI).
 
 ## Sharing what you recorded
 

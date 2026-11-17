@@ -1,5 +1,5 @@
 -- Offline tests for EverlookDB Collector against wowmock.lua: settings live apart from the uploaded data
--- (and `paused` moves out of it), every slash command, the save reminder option and the window.
+-- (and `paused` moves out of it), every slash command and the window; no names of players in the data.
 local ROOT = ...
 local ADDON = "EverlookDB"
 local ns = {}
@@ -27,6 +27,7 @@ C_TooltipInfo = { GetUnit = function() return nil end }
 GetInstanceInfo = function() return "Elwynn", "none" end
 UnitFactionGroup = function() return "Alliance" end
 CORPSE_TOOLTIP = "Corpse of %s"
+UNITNAME_TITLE_COMPANION, UNITNAME_TITLE_PET = "%s's Companion", "%s's Pet"
 MOCK.reloads = 0
 C_UI = { Reload = function() MOCK.reloads = MOCK.reloads + 1 end }
 
@@ -171,6 +172,30 @@ step("quest turn-in: the NPC that takes it and where, never the player", functio
 	for k, v in pairs(q) do
 		check(type(v) ~= "string" or not (me and v:find(me, 1, true)), "player name stored in " .. k)
 	end
+end)
+
+step("settings from the save pop-up's time lose its options", function()
+	EverlookDBSettings.saveReminder, EverlookDBSettings.reminderMinutes = true, 20
+	ns.InitSettings(EverlookDBData)
+	check(EverlookDBSettings.saveReminder == nil and EverlookDBSettings.reminderMinutes == nil, "old options kept")
+	check(ns.app:GetSetting("savereminder") == nil and ns.app:GetSetting("reminderminutes") == nil, "old settings still offered")
+end)
+
+step("a title line that names an owner (Bob's Companion) is never kept", function()
+	check(ns.OwnerTitle("Bob's Companion") and ns.OwnerTitle("Zoë's Pet"), "owner line not recognised")
+	check(not ns.OwnerTitle("<Weapon Merchant>") and not ns.OwnerTitle("Weapon Merchant"), "a real title taken for an owner line")
+end)
+
+step("quest completion: a title holding the player's name is not saved", function()
+	local me = MOCK.units.player.name
+	local secrets = MOCK.secretsOn
+	MOCK.secretsOn = false
+	GetQuestID = function() return 95811 end
+	GetTitleText = function() return "A letter for " .. me end
+	MOCK.Fire("QUEST_COMPLETE")
+	local q = EverlookDBData.quest[95811]
+	MOCK.secretsOn = secrets
+	check(q and q.title == nil, "title with the player's name saved: " .. tostring(q and q.title))
 end)
 
 step("no Lua errors reported", function()

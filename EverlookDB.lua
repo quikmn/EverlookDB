@@ -35,6 +35,8 @@ function ns.InitSettings(data)
   for k, v in pairs(ns.SETTINGS_DEFAULTS) do
     if s[k] == nil then s[k] = v end
   end
+  -- options that no longer exist (the save pop-up after loading screens)
+  s.saveReminder, s.reminderMinutes = nil, nil
   if data and data.paused ~= nil then
     if data.paused then s.paused = true end
     data.paused = nil
@@ -54,6 +56,16 @@ local function safe(f, ...)
   if not r[1] then return nil end
   for i = 2, r.n do r[i] = ok(r[i]) end
   return unpack(r, 2, r.n)
+end
+
+-- Quest text the game shows can carry your character's name (it fills in $N), so text that holds it is
+-- never saved, and the objective paragraph isn't saved at all (the site has the quest texts already).
+local myName  -- read at login, in memory only: the check still works when the name is hidden later
+local function noName(text)
+  local me = ok(UnitName("player")) or myName
+  if me then myName = me end
+  if text and me and me ~= "" and text:find(me, 1, true) then return nil end
+  return text
 end
 
 -- "Creature-0-server-instance-zone-NPCID-spawn" -> "u", NPCID ; GameObject likewise -> "o", id
@@ -125,9 +137,27 @@ local function npcRecord(id)
   return rec
 end
 
+-- "Bob's Companion", "Bob's Pet", ...: the tooltip line under a unit someone owns names its owner
+local OWNER_TITLES = {}
+for _, g in ipairs({ "UNITNAME_TITLE_COMPANION", "UNITNAME_TITLE_PET", "UNITNAME_TITLE_GUARDIAN", "UNITNAME_TITLE_MINION",
+    "UNITNAME_TITLE_CREATION", "UNITNAME_TITLE_CHARM", "UNITNAME_TITLE_SQUIRE" }) do
+  local fmt = _G[g]
+  if type(fmt) == "string" and fmt:find("%s", 1, true) then
+    OWNER_TITLES[#OWNER_TITLES + 1] = "^" .. fmt:gsub("([%(%)%.%[%]%*%+%-%?%^%$%%])", "%%%1"):gsub("%%%%s", ".+") .. "$"
+  end
+end
+local function ownerTitle(text)
+  for _, p in ipairs(OWNER_TITLES) do if text:find(p) then return true end end
+  return false
+end
+ns.OwnerTitle = ownerTitle
+
 local function readUnit(unit, near)
   if paused or not ok(UnitExists(unit)) or ok(UnitIsPlayer(unit)) then return end
   if ok(UnitPlayerControlled(unit)) then return end  -- pets and guardians
+  -- companions and other players' pets carry a name and an owner line that a player chose or is
+  if UnitIsBattlePetCompanion and ok(UnitIsBattlePetCompanion(unit)) then return end
+  if UnitIsOtherPlayersPet and ok(UnitIsOtherPlayersPet(unit)) then return end
   local kind, id = parseGUID(UnitGUID(unit))
   if kind ~= "u" then return end
   local rec = npcRecord(id)
@@ -170,7 +200,7 @@ local function readUnit(unit, near)
         if text then
           if SKINNABLE[text] then rec.skin = SKINNABLE[text] end
           -- line 2 is the title ("<Weapon Merchant>") when it isn't the level line
-          if i == 2 and not text:find("%d") and text ~= rec.name then rec.title = text end
+          if i == 2 and not text:find("%d") and text ~= rec.name and not ownerTitle(text) and noName(text) then rec.title = text end
         end
       end
     end
@@ -369,14 +399,6 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Quests
 
--- Quest text the game shows can carry your character's name (it fills in $N), so text that holds it is
--- never saved, and the objective paragraph isn't saved at all (the site has the quest texts already).
-local function noName(text)
-  local me = ok(UnitName("player"))
-  if text and me and me ~= "" and text:find(me, 1, true) then return nil end
-  return text
-end
-
 local function questRecord(qid)
   changes = changes + 1
   local q = db.quest[qid]
@@ -463,7 +485,7 @@ local function questComplete()
   local qid = ok(GetQuestID())
   if not qid or qid == 0 then return end
   local q = questRecord(qid)
-  q.title = ok(GetTitleText()) or q.title
+  q.title = noName(ok(GetTitleText())) or q.title
   q.to = questParty() or q.to
   local map, x, y = where()
   if map and x then q.toAt = map .. ":" .. x .. ":" .. y end
@@ -585,9 +607,10 @@ local function isCorpse(text)
     and text:sub(1, #corpseBefore) == corpseBefore and text:sub(#text - #corpseAfter + 1) == corpseAfter
 end
 GameTooltip:HookScript("OnShow", function(tip)
-  if tip:GetOwner() ~= UIParent then return end
-  if tip.GetUnit and tip:GetUnit() then return end
-  if tip.GetItem and tip:GetItem() then return end
+  -- through safe(): in combat and instances these can be secret values, which can't be tested
+  if safe(tip.GetOwner, tip) ~= UIParent then return end
+  if tip.GetUnit and safe(tip.GetUnit, tip) then return end
+  if tip.GetItem and safe(tip.GetItem, tip) then return end
   local line = _G.GameTooltipTextLeft1
   local text = noName(line and ok(line:GetText()))
   if text and isCorpse(text) then text = nil end
@@ -604,13 +627,11 @@ local function save()
 end
 ns.Save = save
 
-local loginAt = 0
-
 local f = CreateFrame("Frame")
 local handlers = {
   PLAYER_LOGIN = function()
     init()
-    loginAt = GetTime()
+    noName(nil)  -- remember the player's name for the check (never saved)
     local savingAt = settings.savingAt or db.savingAt  -- older versions kept it in the data
     if savingAt and time() - savingAt < 120 then
       settings.lastSave = savingAt
