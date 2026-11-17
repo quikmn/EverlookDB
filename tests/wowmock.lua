@@ -369,8 +369,15 @@ PartyFrame = newWidget("Frame", "PartyFrame")
 ------------------------------------------------------------------------
 tinsert, tremove, wipe = table.insert, table.remove, function(t) for k in pairs(t) do t[k] = nil end return t end
 strsplit = function(sep, s, n)
-	local out, pattern = {}, "([^" .. sep .. "]*)"
-	for piece in string.gmatch(s, pattern) do out[#out + 1] = piece end
+	-- like WoW's: every piece between separators, empty ones included (Lua 5.1's gmatch also yields an empty
+	-- match after each piece, so split by position instead)
+	local out, from = {}, 1
+	while true do
+		local at = string.find(s, sep, from, true)
+		if not at or (n and #out == n - 1) then out[#out + 1] = string.sub(s, from); break end
+		out[#out + 1] = string.sub(s, from, at - 1)
+		from = at + 1
+	end
 	return unpack(out)
 end
 strtrim = function(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end

@@ -162,6 +162,26 @@ step("status totals are counted once per frame and fresh on the next", function(
 	EverlookDBData.npc[987654] = nil
 end)
 
+step("quest turn-in: the NPC that takes it and where, never the player", function()
+	local realGUID = UnitGUID
+	UnitGUID = function(u) if u == "npc" then return "Creature-0-1-2-3-1077-0000ABCD" end return realGUID(u) end
+	UnitLevel = UnitLevel or function() return 30 end
+	GetQuestID = function() return 95810 end
+	GetTitleText = function() return "Lost Relic Carry" end
+	GetNumQuestRewards, GetNumQuestChoices, GetRewardMoney = function() return 0 end, function() return 0 end, function() return 0 end
+	MOCK.Fire("QUEST_COMPLETE")
+	MOCK.Fire("QUEST_TURNED_IN", 95810, 1250, 0)
+	UnitGUID = realGUID
+	local q = EverlookDBData.quest[95810]
+	check(q and q.to == "u:1077", "turn-in NPC not recorded: " .. tostring(q and q.to))
+	check(q.toAt == "1429:500:500", "turn-in spot: " .. tostring(q.toAt))
+	check(q.done == 1 and q.xp and q.xp[30] == 1250, "turn-in or its XP not counted")
+	local me = MOCK.units.player.name
+	for k, v in pairs(q) do
+		check(type(v) ~= "string" or not (me and v:find(me, 1, true)), "player name stored in " .. k)
+	end
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)
