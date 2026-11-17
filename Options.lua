@@ -20,7 +20,7 @@ ns.app = app
 local function S() return EverlookDBSettings end
 
 app:Setting({
-  key = "savedmessage", type = "bool", label = "Say \"data saved\" in chat after a save",
+  key = "savedmessage", type = "bool", label = "Say \"data saved\" in chat after a save", keywords = { "message", "notification", "quiet", "announce" },
   get = function() return S().savedMessage end, set = function(v) S().savedMessage = v end,
 })
 
@@ -51,7 +51,8 @@ app:Section("status", "Status", function(stack)
   UI.Header(stack, "Recording", "It runs in the background while you play. Nothing to set up.")
   UI.Stat(stack, "Now", function() return ns.IsPaused() and "|cffef5d5dpaused|r" or "|cff62cf88recording|r" end)
   UI.ButtonRow(stack, {
-    { label = "Pause", width = 140, onClick = function() SetPaused(not ns.IsPaused()) end },
+    { label = "Pause", width = 140, onClick = function() SetPaused(not ns.IsPaused()) end,
+      keywords = { "resume", "stop", "recording", "collecting" } },
     refresh = function(row) row.buttons[1]:SetText(ns.IsPaused() and "Resume" or "Pause") end,
   })
   UI.Header(stack, "Recorded so far", "Everything in your data file, from all your play since it started.")
@@ -70,7 +71,8 @@ app:Section("status", "Status", function(stack)
     return t and date("%Y-%m-%d %H:%M", t) or "when you last logged out"
   end)
   UI.ButtonRow(stack, {
-    { label = "Save now (reloads the UI)", width = 220, style = "accent", onClick = function() ns.Save() end },
+    { label = "Save now (reloads the UI)", width = 220, style = "accent", onClick = function() ns.Save() end,
+      keywords = { "reload", "write", "upload", "file" } },
   })
   UI.Note(stack, "Then upload the file: the EverlookDB App (free, on everlookdb.com) uploads it by itself after you play, or upload it by hand on the site.")
   UI.CopyBox(stack, "The file", FILE)

@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- The settings window has a search box at the top: type to find any setting.
+
 ## v0.2.0 (2026-11-17)
 
 - Privacy: a creature's title line that names its owner ("Bob's Companion") is never saved, and companions and other players' pets are not recorded at all. A quest title holding your character's name is not saved when you hand the quest in either (it already wasn't when you took it).
