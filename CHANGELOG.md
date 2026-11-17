@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Privacy: a creature's title line that names its owner ("Bob's Companion") is never saved, and companions and other players' pets are not recorded at all. A quest title holding your character's name is not saved when you hand the quest in either (it already wasn't when you took it).
+- Settings left from the removed save pop-up are cleared from your settings.
+- World-object names: reading the tooltip no longer trips over values the game hides in combat and instances.
 - The "Save EverlookDB data" button no longer pops up in the middle of the screen after a loading screen (it couldn't be dismissed). Save whenever you like with Save now in /edb or `/edb save`; logging out saves too.
 
 - `/edb` opens a window: recording or paused (with a Pause button), everything recorded so far, how much is unsaved and when you last saved, a Save now button, where the data file is and where to upload it, what it records, its privacy rules and options. Also under Settings > AddOns. The old chat summary is `/edb status`. New option: the "data saved" chat line. Your own settings (pause included) are now kept apart from the recorded data. `/edb feedback` opens in the addon's own small window instead of a game pop-up.
