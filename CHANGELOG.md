@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Chat commands now follow one pattern across all EverlookDB addons: `/edb help` (or `?`) lists them; `/edb on`, `off` and `toggle` resume and pause recording; `/edb get` and `/edb set <setting> <value>`; `/edb search <words>`; `/edb status` and `/edb version`; a mistyped command suggests the nearest one. `/edb pause`, `/edb resume` and `/everlookdb` still work.
 - The settings window has a search box at the top: type to find any setting.
 
 ## v0.2.0 (2026-11-17)

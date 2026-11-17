@@ -15,12 +15,18 @@ Your character, realm or account name, other players, chat, your gear or bags. Y
 
 ## Commands
 
+`/edb` (also `/everlookdb`) follows the same pattern as every EverlookDB addon:
+
 - `/edb`: the window (also under Settings > AddOns)
-- `/edb status`: what has been recorded so far, in chat
+- `/edb off` / `/edb on` (or `toggle`): pause and resume recording (`/edb pause` and `/edb resume` still work)
 - `/edb save`: write the data file now (reloads the UI)
-- `/edb pause` / `/edb resume`: stop and restart recording
+- `/edb status`: version, recording or paused, and what has been recorded so far
+- `/edb savedmessage off`, or `/edb set savedmessage off`: change a setting; `/edb get` lists them
+- `/edb search <words>`: open the window with its search box filled
 - `/edb feedback`: a link for reporting bugs and ideas
-- `/edb savedmessage off` and the like: change a setting (`/edb settings` lists them, `/edb help` everything)
+- `/edb help` (or `/edb ?`): every command; `/edb version`
+
+A mistyped command suggests the nearest one.
 
 The game only writes addon data when you log out or reload. To write it now, use Save now in `/edb` or `/edb save` (it reloads the UI).
 

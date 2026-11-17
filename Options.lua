@@ -9,6 +9,7 @@ local app = UI:NewApp({
   name = "EverlookDB Collector",
   addon = ADDON,
   slash = "/edb",
+  aliases = { "/everlookdb" },
   frameName = "EverlookDB",
   tagline = "Notes loot, vendors, quests and where NPCs and nodes are while you play, for EverlookDB.com. Saves nothing about you.",
   accent = { 1.0, 0.824, 0.0 }, -- EverlookDB gold
@@ -32,18 +33,18 @@ end
 
 local function StatusLine()
   local s = ns.Status()
-  return ("%s. %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests."):format(
-    ns.IsPaused() and "paused" or "recording", s.npcs, s.loot, s.looted, s.objects, s.vendors, s.trainers, s.quests)
+  return ("Recorded: %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests."):format(
+    s.npcs, s.loot, s.looted, s.objects, s.vendors, s.trainers, s.quests)
 end
 
-app:Command("save", "save", "write the data file now (reloads the UI)", function() ns.Save() end)
-app:Command("pause", "pause", "stop recording", function() SetPaused(true) end)
-app:Command("resume", "resume", "record again", function() SetPaused(false) end)
-app:Command("status", "status", "what's recorded so far, in chat (what a bare /edb used to print)", function()
-  app:Print(StatusLine())
-  app:Print("Upload " .. FILE .. " on EverlookDB.com, or let the EverlookDB App do it.")
+-- /edb on, off, toggle: recording (/edb pause and /edb resume still work). status and feedback come from EverlookUI.
+app:OnOff({ label = "Recording", get = function() return not ns.IsPaused() end, set = function(on) ns.SetPaused(not on) end })
+app:StatusLines(function()
+  return { StatusLine(), "Upload " .. FILE .. " on EverlookDB.com, or let the EverlookDB App do it." }
 end)
-app:Command("feedback", "feedback", "a link for bugs and ideas", function() app:ShowFeedback() end, { "bug" })
+app:Command("save", "save", "write the data file now (reloads the UI)", function() ns.Save() end)
+app:Command("pause", "pause", "stop recording", function() SetPaused(true) end).hidden = true
+app:Command("resume", "resume", "record again", function() SetPaused(false) end).hidden = true
 
 local function N(key) return function() return tostring(ns.Status()[key]) end end
 
@@ -102,12 +103,8 @@ app:Section("options", "Options", function(stack)
   UI.Header(stack, "Saving")
   app:Widget(stack, "savedmessage")
   UI.Header(stack, "Chat commands")
-  UI.Note(stack, "/edb  this window\n/edb save  write the data file now (reloads the UI)\n/edb pause, /edb resume\n/edb status  what's recorded, in chat\n/edb feedback  a link for bugs and ideas\n/edb savedmessage off  change a setting (/edb settings lists them)\n/edb help  all of this in chat")
+  UI.Note(stack, "/edb  this window\n/edb off, /edb on  pause or resume recording\n/edb save  write the data file now (reloads the UI)\n/edb status  what's recorded, in chat\n/edb savedmessage off  change a setting (/edb get lists them)\n/edb search <words>  find a setting\n/edb feedback  a link for bugs and ideas\n/edb help  all of this in chat")
 end)
 
-SLASH_EVERLOOKDB1 = "/edb"
-SLASH_EVERLOOKDB2 = "/everlookdb"
-SlashCmdList.EVERLOOKDB = function(msg)
-  if not ns.Ready() then return end -- before PLAYER_LOGIN there is nothing to show yet
-  app:HandleSlash(msg)
-end
+-- /edb, also /everlookdb. Before PLAYER_LOGIN there is nothing to show yet.
+app:RegisterSlash("EVERLOOKDB", function() return not ns.Ready() end)
