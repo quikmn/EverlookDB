@@ -617,7 +617,10 @@ local function offerSave()
     saveButton:Hide()
   end
   saveButton:Show()
-  C_Timer.After(30, function() if saveButton then saveButton:Hide() end end)
+  local shownAt = GetTime()
+  saveButton.shownAt = shownAt
+  -- hide 30 s after the latest offer (an earlier offer's timer must not cut a newer one short)
+  C_Timer.After(30, function() if saveButton and saveButton.shownAt == shownAt then saveButton:Hide() end end)
 end
 
 local loginAt = 0
@@ -698,13 +701,19 @@ end
 function ns.IsPaused() return paused end
 
 -- Totals of what's recorded, and how much is unsaved since the last save (login or reload).
+-- Counted once per frame: the window shows a dozen of these numbers at once.
+local statusCache, statusAt
 function ns.Status()
+  local now = GetTime()
+  if statusCache and statusAt == now then return statusCache end
   local kills = 0
   for _, rec in pairs(db.loot) do kills = kills + rec.n end
-  return {
+  local s = {
     npcs = count(db.npc), loot = count(db.loot), looted = kills, objects = count(db.obj),
     vendors = count(db.vendor), trainers = count(db.trainer), quests = count(db.quest),
     since = db.since, unsaved = changes, lastSave = settings.lastSave,
   }
+  statusCache, statusAt = s, now
+  return s
 end
 function ns.Ready() return db ~= nil end

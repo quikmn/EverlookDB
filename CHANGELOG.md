@@ -5,6 +5,9 @@
 - `/edb` opens a window: recording or paused (with a Pause button), everything recorded so far, how much is unsaved and when you last saved, a Save now button, where the data file is and where to upload it, what it records, its privacy rules and options. Also under Settings > AddOns. The old chat summary is `/edb status`. New options: the save button after a loading screen on or off and after how many minutes (20, as before), and the "data saved" chat line. Your own settings (pause included) are now kept apart from the recorded data. `/edb feedback` opens in the addon's own small window instead of a game pop-up.
 - Quest text that holds your character's name (the game fills it in for some quests) is no longer saved, and neither is a quest's objective paragraph; what older versions saved of it is removed from your data file. The site shows the quest texts from the game data instead. A player's corpse is never taken as the name of an object you loot next.
 - `/edb feedback` shows a link for reporting bugs and ideas.
+- The window counts your totals once instead of once per line, so it opens faster with a big data file.
+- The "Save EverlookDB data" button after a loading screen always stays its full 30 seconds.
+- Settings window: Escape closes an open dropdown list first, then the window; Escape in a text box puts the old text back; a number typed next to a slider snaps to the slider's steps; a Delete or Reset that asks for a second click no longer forgets it early.
 
 ## v0.1.3 (2026-11-14)
 

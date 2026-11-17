@@ -151,6 +151,17 @@ step("no taint: only our own globals", function()
 	check(next(UISpecialFrames) == nil, "UISpecialFrames used")
 end)
 
+step("status totals are counted once per frame and fresh on the next", function()
+	local a = ns.Status()
+	check(ns.Status() == a, "counted again in the same frame")
+	local npcs = a.npcs
+	EverlookDBData.npc[987654] = EverlookDBData.npc[987654] or { n = "Test" }
+	MOCK.time = MOCK.time + 1
+	local b = ns.Status()
+	check(b ~= a and b.npcs == npcs + 1, "next frame not recounted")
+	EverlookDBData.npc[987654] = nil
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)
