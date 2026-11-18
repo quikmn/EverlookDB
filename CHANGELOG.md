@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.4.1 (2026-11-18)
 
 - Settings: an AI help button copies a description of every setting for an AI assistant, and `/edb apply` runs the commands it gives back.
 
