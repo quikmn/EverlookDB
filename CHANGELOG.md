@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.4.0 (2026-11-18)
 
 - Hunters: records what a freshly tamed pet knows and what Beast Lore shows, so EverlookDB can tell every hunter which beast teaches which rank.
 
