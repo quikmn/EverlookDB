@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Settings: an AI help button copies a description of every setting for an AI assistant, and `/edb apply` runs the commands it gives back.
+
 ## v0.4.0 (2026-11-18)
 
 - Hunters: records what a freshly tamed pet knows and what Beast Lore shows, so EverlookDB can tell every hunter which beast teaches which rank.
