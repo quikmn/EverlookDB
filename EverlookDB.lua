@@ -5,6 +5,7 @@
 --   trainers what each trainer teaches, for how much, from which level
 --   vendors  what each vendor sells, for how much, and whether stock is limited
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards, XP
+--   beasts   (hunters, Beasts.lua) what a freshly tamed pet knows and what Beast Lore shows, by the beast's npc id
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
 -- /edb opens the window (what's recorded, saving, privacy, options); /edb help lists the commands.
@@ -80,6 +81,8 @@ local function parseGUID(guid)
   return nil
 end
 
+ns.ok, ns.safe, ns.parseGUID = ok, safe, parseGUID
+
 local function itemID(link)
   link = ok(link)
   return link and tonumber(link:match("item:(%d+)")) or nil
@@ -125,6 +128,7 @@ end
 -- NPCs
 
 local scanned = {}  -- npc ids whose tooltip was read this session
+local levelCounted, levelCountedN = {}, 0  -- beast spawns (GUIDs) whose level was counted this session
 local recent = {}   -- name -> { id, level, at }: NPCs seen lately, to match "X dies, you gain N experience"
 local SKINNABLE = {}
 for _, g in ipairs({ "UNIT_SKINNABLE_LEATHER", "UNIT_SKINNABLE_HERB", "UNIT_SKINNABLE_ROCK", "UNIT_SKINNABLE_BOLTS" }) do
@@ -136,6 +140,7 @@ local function npcRecord(id)
   if not rec then rec = {}; db.npc[id] = rec end
   return rec
 end
+ns.NpcRecord = npcRecord
 
 -- "Bob's Companion", "Bob's Pet", ...: the tooltip line under a unit someone owns names its owner
 local OWNER_TITLES = {}
@@ -185,6 +190,17 @@ local function readUnit(unit, near)
   rec.class = ok(UnitClassification(unit)) or rec.class      -- normal, elite, rare, rareelite, worldboss
   rec.type = ok(UnitCreatureType(unit)) or rec.type          -- Beast, Humanoid, ... (client language)
   rec.family = ok(UnitCreatureFamily(unit)) or rec.family    -- Wolf, Spider, ...
+  -- beasts: how many spawns were seen at each level (each spawn once a session), so a level spread shows
+  if lvl and lvl > 0 and ok(UnitCreatureFamily(unit)) then
+    local guid = ok(UnitGUID(unit))
+    if guid and not levelCounted[guid] then
+      if levelCountedN > 5000 then levelCounted, levelCountedN = {}, 0 end
+      levelCounted[guid], levelCountedN = true, levelCountedN + 1
+      rec.lvl = rec.lvl or {}
+      rec.lvl[lvl] = (rec.lvl[lvl] or 0) + 1
+      changes = changes + 1
+    end
+  end
   local faction = ok(UnitFactionGroup("player"))
   local reaction = ok(UnitReaction(unit, "player"))
   if faction and reaction then
@@ -588,6 +604,7 @@ local function init()
   -- older versions saved each quest's objective paragraph, which can hold your character's name: drop it
   for _, q in pairs(db.quest) do q.objective = nil end
   db.trainer = db.trainer or {}
+  db.beast = db.beast or {}
   settings = ns.InitSettings(db)
   paused = settings.paused and true or false
 
@@ -632,6 +649,7 @@ local handlers = {
   PLAYER_LOGIN = function()
     init()
     noName(nil)  -- remember the player's name for the check (never saved)
+    if ns.BeastsReady then ns.BeastsReady() end
     local savingAt = settings.savingAt or db.savingAt  -- older versions kept it in the data
     if savingAt and time() - savingAt < 120 then
       settings.lastSave = savingAt
@@ -707,9 +725,13 @@ function ns.Status()
   local s = {
     npcs = count(db.npc), loot = count(db.loot), looted = kills, objects = count(db.obj),
     vendors = count(db.vendor), trainers = count(db.trainer), quests = count(db.quest),
+    beasts = count(db.beast or {}),
     since = db.since, unsaved = changes, lastSave = settings.lastSave,
   }
   statusCache, statusAt = s, now
   return s
 end
 function ns.Ready() return db ~= nil end
+function ns.Data() return db end
+function ns.Changed(n) changes = changes + (n or 1) end
+ns.NoName = function(text) return noName(text) end

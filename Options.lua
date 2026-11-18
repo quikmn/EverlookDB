@@ -33,8 +33,11 @@ end
 
 local function StatusLine()
   local s = ns.Status()
-  return ("Recorded: %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests."):format(
+  local line = ("Recorded: %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests."):format(
     s.npcs, s.loot, s.looted, s.objects, s.vendors, s.trainers, s.quests)
+  local beasts, tames, lore = ns.BeastStatus()
+  if beasts > 0 then line = line .. (" Beast abilities: %d beasts (%d tames, %d Beast Lore reads)."):format(beasts, tames, lore) end
+  return line
 end
 
 -- /edb on, off, toggle: recording (/edb pause and /edb resume still work). status and feedback come from EverlookUI.
@@ -63,6 +66,10 @@ app:Section("status", "Status", function(stack)
   UI.Stat(stack, "Vendors", N("vendors"))
   UI.Stat(stack, "Trainers", N("trainers"))
   UI.Stat(stack, "Quests", N("quests"))
+  UI.Stat(stack, "Beasts (hunters)", function()
+    local beasts, tames, lore = ns.BeastStatus()
+    return beasts .. "  (" .. tames .. " tames, " .. lore .. " Beast Lore reads)"
+  end)
   UI.Stat(stack, "Collecting since", function() local t = ns.Status().since; return t and date("%Y-%m-%d", t) or "-" end)
 
   UI.Header(stack, "Saving and uploading", "The game writes the data file only when you log out or reload.")
@@ -88,11 +95,12 @@ app:Section("records", "What it records", function(stack)
   UI.Note(stack, "|cffe6e8eeVendors|r  what they sell, the price, the stack size and whether stock is limited.")
   UI.Note(stack, "|cffe6e8eeQuests|r  who starts and ends each quest and where, the lowest level it was offered at, objectives, required items, rewards and XP.")
   UI.Note(stack, "|cffe6e8eeXP|r  the XP a kill gave when you play solo.")
+  UI.Note(stack, "|cffe6e8eeHunters|r  when you tame a beast: which beast it was and its level, and what the new pet knows in its first 30 seconds (its abilities and ranks, Faster or Slower Attack, attack speed, level, family, training points and diet). When you cast Beast Lore: the lines it adds to the beast's tooltip, the beast and its level. Never the pet's name. Kept as counts with the game version and the week, never the day or time.")
 end)
 
 app:Section("privacy", "Privacy", function(stack)
   UI.Header(stack, "Privacy", "It never records anything about you.")
-  UI.Note(stack, "Never recorded: your character, realm or account name, other players, chat, your gear or bags.")
+  UI.Note(stack, "Never recorded: your character, realm or account name, other players, chat, your gear or bags, or your pets' names.")
   UI.Note(stack, "Quest text the game fills in with your character's name is never saved. A player's corpse or your own name is never taken as the name of something you loot.")
   UI.Note(stack, "Your level is used only to note the lowest level a quest was offered at and the XP a kill or quest gave at your level.")
   UI.Note(stack, "Your settings for this window (pause, the chat message, the window position) are kept apart from the recorded data; the site reads only the game facts.")

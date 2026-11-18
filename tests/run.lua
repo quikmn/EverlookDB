@@ -225,6 +225,181 @@ step("quest completion: a title holding the player's name is not saved", functio
 	check(q and q.title == nil, "title with the player's name saved: " .. tostring(q and q.title))
 end)
 
+---------------------------------------------------------------------------------------------------------------
+-- Hunters: fresh tames and Beast Lore (Beasts.lua)
+
+-- A small world for the hunter steps: a wild beast as the target, the player's pet, its spellbook and tooltip lines.
+local H = { guids = {}, levels = {}, families = {}, petSpells = {}, lines = {}, secretLine = false }
+local NAMES = { [17253] = "Bite", [17255] = "Bite", [17256] = "Bite", [23099] = "Dash", [23109] = "Dash",
+	[24450] = "Prowl", [1263099] = "Faster Attack I", [1263100] = "Faster Attack II", [26064] = "Shell Shield" }
+local saved = {}
+local function stub(name, fn) if saved[name] == nil then saved[name] = _G[name] or false end; _G[name] = fn end
+local function unstubAll() for k, v in pairs(saved) do _G[k] = v or nil end; saved = {} end
+local function hunterWorld()
+	stub("UnitGUID", function(u) return H.guids[u] end)
+	stub("UnitLevel", function(u) return H.levels[u] end)
+	stub("UnitCreatureFamily", function(u) local f = H.families[u]; if f then return f[1], f[2] end end)
+	stub("UnitAttackSpeed", function(u) if u == "pet" then return 1.8, nil end end)
+	stub("C_PetInfo", { GetPetTrainingPoints = function() return 24, 0 end, GetPetFoodTypes = function() return { "Meat", "Fish" } end })
+	stub("PET_DIET_TEMPLATE", "Diet: %s")
+	stub("TAMEABLE", "Tameable")
+	stub("C_SpellBook", {
+		HasPetSpells = function() return #H.petSpells, "PET" end,
+		GetSpellBookItemInfo = function(i) local s = H.petSpells[i]; return s and { spellID = s[1], isPassive = s[2], name = "Wolfie's " .. s[1] } end,
+	})
+	stub("C_UnitAuras", { GetAuraDataByIndex = function(u, i)
+		if u ~= "pet" then return nil end
+		return ({ { spellId = 1263100, duration = 0 }, { spellId = 999, duration = 30 } })[i]
+	end })
+	stub("C_Spell", { GetSpellName = function(id) return NAMES[id] or ("Spell" .. id) end })
+	stub("C_TooltipInfo", { GetUnit = function(u)
+		if u ~= "target" then return nil end
+		local out = {}
+		for i, t in ipairs(H.lines) do out[i] = { leftText = (H.secretLine and i == 2) and MOCK.Secret(t) or t, type = 0 } end
+		return { lines = out }
+	end })
+	ns.BeastsReady()
+end
+local function runTimers(n) for _ = 1, n or 10 do MOCK.RunTimers() end end
+local function hasText(t, needle)
+	for k, v in pairs(t) do
+		if type(k) == "string" and k:find(needle, 1, true) then return true end
+		if type(v) == "string" and v:find(needle, 1, true) then return true end
+		if type(v) == "table" and hasText(v, needle) then return true end
+	end
+	return false
+end
+local LORE_BEFORE = { "Mangy Wolf", "Level 11 Beast (Wolf)", "Skinnable" }
+local LORE_AFTER = { "Mangy Wolf", "Level 11 Beast (Wolf)", "Skinnable", "Tameable", "Diet: Meat", "Abilities: Bite (Rank 2), Dash (Rank 1)" }
+
+step("ISO week buckets: no day, no time of day", function()
+	check(ns.IsoWeek(os.time({ year = 2026, month = 11, day = 18, hour = 12 })) == "2026-W47", "2026-11-18")
+	check(ns.IsoWeek(os.time({ year = 2021, month = 1, day = 1, hour = 12 })) == "2020-W53", "2021-01-01 belongs to 2020's week 53")
+	check(ns.IsoWeek(os.time({ year = 2024, month = 12, day = 30, hour = 12 })) == "2025-W01", "2024-12-30 is week 1 of 2025")
+end)
+
+step("Beast Lore ability lines turn into spell ids in the client's language", function()
+	hunterWorld()
+	local ids = ns.SpellsIn("Abilities: Bite (Rank 3), Dash (Rank 1), Faster Attack II, Shell Shield")
+	table.sort(ids)
+	check(table.concat(ids, ",") == "17256,23099,26064,1263100", "got " .. table.concat(ids, ","))
+	check(#ns.SpellsIn("Bite") == 0, "a many-rank ability without a rank was placed")
+	unstubAll()
+end)
+
+step("fresh tame: the new pet's spellbook, auras, speed, level, family, training points, diet; never its name", function()
+	hunterWorld()
+	if ns.IsPaused() then ns.SetPaused(false) end
+	H.guids.target = "Creature-0-1-2-3-3825-0000AB12CD"
+	H.levels.target, H.levels.pet = 12, 12
+	H.families.pet = { "Cat", 2 }
+	H.petSpells = {}   -- the spellbook arrives late
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Ashenvale Panther", "cast-1", 1515)
+	MOCK.Fire("UNIT_SPELLCAST_CHANNEL_START", "player", "cast-1", 1515)
+	H.guids.target = nil
+	H.guids.pet = "Pet-0-1-2-3-3825-0100AB12CD"
+	MOCK.Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", "cast-1", 1515)
+	MOCK.Fire("UNIT_PET", "player")
+	runTimers(2)
+	check(not EverlookDBData.beast[3825], "noted before the 30 seconds were up")
+	H.petSpells = { { 17253, false }, { 24450, false }, { 1263100, true } }
+	runTimers(10)
+	local t = EverlookDBData.beast[3825] and EverlookDBData.beast[3825].tame
+	check(t and t.n == 1, "tame not noted")
+	check(t.lvl[12] == 1 and t.plvl[12] == 1 and t.fam[2] == 1, "levels / family")
+	check(t.s[17253] == 1 and t.s[24450] == 1 and t.s[1263100] == 1 and t.pas[1263100] and not t.pas[17253], "spells / passive flag")
+	check(t.set["17253,24450,1263100"] == 1, "whole list")
+	check(t.aura[1263100] == 1 and not t.aura[999], "permanent auras only")
+	check(t.spd["1.80"] == 1 and t.tp["12:24:0"] == 1 and t.diet.Meat == 1 and t.diet.Fish == 1, "speed / training points / diet")
+	local key = next(EverlookDBData.beast[3825].wk)
+	check(key and key:match("^1%.16%.1%.12345:%d%d%d%d%-W%d%d$"), "time bucket: " .. tostring(key))
+	check(not hasText(EverlookDBData.beast, "Wolfie") and not hasText(EverlookDBData.beast, "Tester"), "a name was saved")
+	-- the same pet again (a summon, a reload) is not a second tame
+	MOCK.Fire("UNIT_PET", "player")
+	runTimers(10)
+	check(t.n == 1, "counted twice")
+	unstubAll()
+end)
+
+step("a failed tame, then calling an old pet, notes nothing", function()
+	hunterWorld()
+	H.guids.target = "Creature-0-1-2-3-1131-0000AB12CE"
+	H.levels.target = 9
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-2", 1515)
+	MOCK.Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "cast-2", 1515)
+	H.guids.pet = "Pet-0-1-2-3-3825-0100FFFFFF"   -- the old cat: another creature id
+	H.petSpells = { { 17253, false } }
+	MOCK.Fire("UNIT_PET", "player")
+	runTimers(10)
+	check(not EverlookDBData.beast[1131], "an old pet was taken for a tame")
+	unstubAll()
+end)
+
+step("Beast Lore: the lines it adds, as the game gives them, spell ids, level and a count of reads", function()
+	hunterWorld()
+	H.guids.target = "Creature-0-1-2-3-1131-0000AB12CF"
+	H.levels.target = 11
+	H.lines = LORE_BEFORE
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-3", 1462)
+	H.lines = LORE_AFTER
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-3", 1462)
+	runTimers(4)
+	local L = EverlookDBData.beast[1131] and EverlookDBData.beast[1131].lore
+	check(L and L.n == 1 and L.lvl[11] == 1, "read not counted")
+	check(L.t and L.t.Tameable == 1, "tameable line")
+	check(L.d and L.d["Diet: Meat"] == 1, "diet line")
+	check(L.a and L.a["Abilities: Bite (Rank 2), Dash (Rank 1)"] == 1, "ability line")
+	check(L.s[17255] == 1 and L.s[23099] == 1, "spell ids")
+	check(not hasText(L, "Skinnable") and not hasText(L, "Level 11") and not hasText(L, "Mangy Wolf"), "the usual lines were kept")
+	-- a second cast is a second read
+	H.lines = LORE_BEFORE
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-4", 1462)
+	H.lines = LORE_AFTER
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-4", 1462)
+	runTimers(4)
+	check(L.n == 2 and L.s[17255] == 2 and L.a["Abilities: Bite (Rank 2), Dash (Rank 1)"] == 2, "second read")
+	-- a read with a line hidden from addons (combat) is skipped
+	H.secretLine = true
+	H.lines = LORE_BEFORE
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-5", 1462)
+	H.lines = LORE_AFTER
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-5", 1462)
+	runTimers(4)
+	check(L.n == 2, "a read with hidden values was counted")
+	H.secretLine = false
+	unstubAll()
+end)
+
+step("beasts: each spawn's level counted once, so the level spread shows", function()
+	hunterWorld()
+	H.guids.target = "Creature-0-1-2-3-1131-0000AB1300"
+	H.levels.target = 10
+	H.families.target = { "Wolf", 1 }
+	stub("UnitExists", function(u) return u == "target" end)
+	stub("UnitIsPlayer", function() return false end)
+	stub("UnitPlayerControlled", function() return false end)
+	stub("UnitName", function(u) if u == "target" then return "Mangy Wolf" end end)
+	stub("UnitHealthMax", function() return 100 end)
+	stub("UnitClassification", function() return "normal" end)
+	stub("UnitCreatureType", function() return "Beast" end)
+	stub("UnitReaction", function() return 2 end)
+	stub("CheckInteractDistance", function() return false end)
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	H.guids.target = "Creature-0-1-2-3-1131-0000AB1301"
+	H.levels.target = 11
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	local lvl = EverlookDBData.npc[1131] and EverlookDBData.npc[1131].lvl
+	check(lvl and lvl[10] == 1 and lvl[11] == 1, "levels: " .. tostring(lvl and lvl[10]))
+	unstubAll()
+end)
+
+step("status names the beasts", function()
+	MOCK.log = {}
+	SlashCmdList.EVERLOOKDB("status")
+	check(table.concat(MOCK.log, " "):find("Beast abilities: 2 beasts (1 tames, 2 Beast Lore reads)", 1, true), table.concat(MOCK.log, " / "))
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)

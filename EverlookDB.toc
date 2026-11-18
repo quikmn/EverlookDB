@@ -9,4 +9,5 @@
 Libs\LibStub\LibStub.lua
 Libs\EverlookUI\EverlookUI.lua
 EverlookDB.lua
+Beasts.lua
 Options.lua

@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Hunters: records what a freshly tamed pet knows and what Beast Lore shows, so EverlookDB can tell every hunter which beast teaches which rank.
+
 ## v0.3.0 (2026-11-18)
 
 - Chat commands now follow one pattern across all EverlookDB addons: `/edb help` (or `?`) lists them; `/edb on`, `off` and `toggle` resume and pause recording; `/edb get` and `/edb set <setting> <value>`; `/edb search <words>`; `/edb status` and `/edb version`; a mistyped command suggests the nearest one. `/edb pause`, `/edb resume` and `/everlookdb` still work.

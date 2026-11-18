@@ -4,14 +4,19 @@ A World of Warcraft: Forever addon that notes what you see while you play, so Ev
 
 ## What it records
 
-- **Loot:** what each mob dropped, what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node is counted once, which is what gives drop rates.
-- **NPCs:** name, level, type and family, whether they are rare or elite, whether they can be skinned, and where they stand. Positions are only taken when you are within about 10 yards of the NPC, so they are accurate.
+- **Loot:** what each mob dropped, what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node is counted once, which is what gives drop rates. Money from a corpse when only one was looted.
+- **NPCs:** name, title, level, type and family, whether they are rare or elite, whether they can be skinned, maximum health per level, how they react to your faction, every zone they are seen in, and where they stand. Positions are only taken when you are within about 10 yards of the NPC, so they are accurate. For beasts, how many spawns were seen at each level.
+- **XP:** the XP a kill gave when you play solo (your level and the mob's level), and the XP a quest gave at your level.
+- **Services and trainers:** flight masters, bankers, auctioneers, stable masters, innkeepers and trainers, and what each trainer teaches, for how much and from which level.
 - **Vendors:** what they sell, the price, the stack size and whether stock is limited.
 - **Quests:** who starts and ends each quest and where, the lowest level it was offered at, its objectives, required items and rewards.
+- **Hunters, when you tame a beast:** which beast it was (its NPC id) and its level, and what the new pet shows in its first 30 seconds: the spell ids in its spellbook and which are passive, its permanent auras (Faster or Slower Attack), its attack speed, level, family, training points, and the game's words for what it eats.
+- **Hunters, when you cast Beast Lore:** the lines Beast Lore adds to the beast's tooltip, exactly as the game shows them (abilities, diet, tameable and the like), the ability lines turned into spell ids, the beast (its NPC id) and its level, and how many times you read it.
+- With every file: the game's language, the game versions you played on, when the addon started recording, and when you last opened each vendor and trainer. Tames and Beast Lore reads are counted per game version and calendar week (for example `2026-W47`), never by day or time of day.
 
 ## What it never records
 
-Your character, realm or account name, other players, chat, your gear or bags. Your level is used only to note the lowest level a quest was offered at.
+Your character, realm or account name, other players, chat, your gear or bags, and your pets' names. Your level is used only for the lowest level a quest was offered at and the XP a kill or quest gave. Nothing leaves your computer until you upload the file yourself (on the site or with the EverlookDB App).
 
 ## Commands
 
