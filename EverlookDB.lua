@@ -733,7 +733,9 @@ local handlers = {
   LOOT_OPENED = readLoot,
   LOOT_CLOSED = lootClosed,
   MERCHANT_SHOW = function()
-    if readVendor() and not paused then C_Timer.After(1.5, readVendor) end  -- uncached items arrive later
+    -- uncached items arrive later: read again only when some were missing (0 is true in Lua)
+    local missing = readVendor()
+    if missing and missing > 0 and not paused then C_Timer.After(1.5, readVendor) end
   end,
   GOSSIP_SHOW = function() readUnit("npc", true) end,
   TRAINER_SHOW = function() C_Timer.After(0.5, readTrainer) end,   -- the list fills in a moment later

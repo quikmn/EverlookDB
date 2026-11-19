@@ -4,6 +4,7 @@
 
 - NPC spawn spots: a creature you stand next to now counts once per play session, not once every second you stay near it, so the site's spawn maps show where creatures really stand instead of where you waited longest. Spots counted the old way in your data file are set to "seen here" once, the next time you log in.
 - Lighter while you play: your position is read once a second for all nameplates together, not once per nameplate.
+- Vendors: a vendor's list is read once when you open it, and a second time only when some items were still loading.
 
 ## v0.4.1 (2026-11-18)
 

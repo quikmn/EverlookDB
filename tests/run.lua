@@ -466,6 +466,24 @@ step("seen sets stay bounded and remember the newest keys", function()
 	check(s.has(10) and s.has(9) and s.has(7) and not s.has(1), "wrong keys kept")
 end)
 
+step("vendor: read once when every item is known, again a moment later when some were still loading", function()
+	local reads, missingLinks = 0, 0
+	stub("UnitGUID", function(u) if u == "npc" then return "Creature-0-1-2-3-1250-0000BB0001" end end)
+	stub("UnitExists", function() return false end)
+	stub("UnitReaction", function() return 5 end)
+	stub("GetMerchantNumItems", function() reads = reads + 1; return 2 end)
+	stub("GetMerchantItemLink", function(slot) if slot == 2 and missingLinks > 0 then missingLinks = missingLinks - 1; return nil end return "|Hitem:" .. (100 + slot) .. ":|h[x]|h" end)
+	stub("C_MerchantFrame", { GetItemInfo = function() return { price = 10, stackCount = 1, numAvailable = -1 } end })
+	MOCK.Fire("MERCHANT_SHOW")
+	runTimers(3)
+	check(reads == 1, "every item known, read " .. reads .. " times")
+	reads, missingLinks = 0, 1
+	MOCK.Fire("MERCHANT_SHOW")
+	runTimers(3)
+	check(reads == 2 and EverlookDBData.vendor[1250].i[102], "an item still loading: read " .. reads .. " times")
+	unstubAll()
+end)
+
 step("status names the beasts", function()
 	MOCK.log = {}
 	SlashCmdList.EVERLOOKDB("status")
