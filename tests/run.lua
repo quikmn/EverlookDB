@@ -201,6 +201,12 @@ step("quest turn-in: the NPC that takes it and where, never the player", functio
 	end
 end)
 
+step("quest turn-in: XP and money the game hides are skipped, not compared", function()
+	MOCK.Fire("QUEST_TURNED_IN", 95812, MOCK.Secret(900), MOCK.Secret(50))
+	local q = EverlookDBData.quest[95812]
+	check(q and q.done == 1 and q.xp == nil and q.money == nil, "hidden values saved or turn-in lost")
+end)
+
 step("settings from the save pop-up's time lose its options", function()
 	EverlookDBSettings.saveReminder, EverlookDBSettings.reminderMinutes = true, 20
 	ns.InitSettings(EverlookDBData)

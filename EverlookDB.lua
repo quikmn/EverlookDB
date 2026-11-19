@@ -753,6 +753,10 @@ local handlers = {
     if paused or not qid then return end
     local q = questRecord(qid)
     q.done = (q.done or 0) + 1
+    -- XP and money can be values the game hides from addons: compare them only when they are plain numbers
+    xp, money = ok(xp), ok(money)
+    xp = type(xp) == "number" and xp or nil
+    money = type(money) == "number" and money or nil
     local pl = ok(UnitLevel("player"))
     if pl and xp and xp > 0 then
       q.xp = q.xp or {}
