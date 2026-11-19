@@ -1,5 +1,5 @@
 ## Interface: 16001
-## Title: EverlookDB Collector
+## Title: EverlookDB Collector: loot, NPCs, quests
 ## Notes: Notes loot, vendors, quests and where NPCs and nodes are while you play, for EverlookDB.com. Saves nothing about you. /edb
 ## Author: quikmn
 ## Version: v0.4.1
