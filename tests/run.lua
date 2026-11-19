@@ -394,6 +394,78 @@ step("beasts: each spawn's level counted once, so the level spread shows", funct
 	unstubAll()
 end)
 
+-- A creature next to the player, seen on its nameplate every second: one spawn, one count.
+local function nearWorld(guids)
+	local plates = {}
+	for i, g in ipairs(guids) do plates[i] = { namePlateUnitToken = "nameplate" .. i } end
+	local function guidOf(u) local i = tonumber(tostring(u):match("^nameplate(%d+)$")); return i and guids[i] end
+	stub("UnitGUID", guidOf)
+	stub("UnitExists", function(u) return guidOf(u) ~= nil end)
+	stub("UnitIsPlayer", function() return false end)
+	stub("UnitPlayerControlled", function() return false end)
+	stub("UnitName", function(u) return guidOf(u) and "Kobold Vermin" end)
+	stub("UnitLevel", function() return 2 end)
+	stub("UnitHealthMax", function() return 50 end)
+	stub("UnitClassification", function() return "normal" end)
+	stub("UnitCreatureType", function() return "Humanoid" end)
+	stub("UnitCreatureFamily", function() return nil end)
+	stub("UnitReaction", function() return 2 end)
+	stub("CheckInteractDistance", function() return true end)
+	local whereCalls = 0
+	stub("C_Map", {
+		GetBestMapForUnit = function() whereCalls = whereCalls + 1; return 1429 end,
+		GetPlayerMapPosition = function() return { GetXY = function() return 0.4, 0.6 end } end,
+	})
+	stub("C_NamePlate", { GetNamePlates = function() return plates end })
+	return function() return whereCalls end
+end
+
+step("spawns: a creature you stand next to counts once a session, not once a second", function()
+	local whereCalls = nearWorld({ "Creature-0-1-2-3-6-0000AA0001", "Creature-0-1-2-3-6-0000AA0002" })
+	EverlookDBData.npc[6] = nil
+	MOCK.time = MOCK.time + 1
+	local before = ns.Status().unsaved
+	for _ = 1, 30 do MOCK.time = MOCK.time + 1; MOCK.RunTimers() end
+	local cells = EverlookDBData.npc[6] and EverlookDBData.npc[6].p and EverlookDBData.npc[6].p[1429]
+	check(cells and cells["400:600"] == 2 and cells.n == 1, "two spawns, 30 s: " .. tostring(cells and cells["400:600"]))
+	MOCK.time = MOCK.time + 1
+	local unsaved = ns.Status().unsaved
+	check(unsaved - before <= 4, "changed-since-save counts every second: " .. (unsaved - before))
+	-- the player's position is read once a tick, not once per plate (two plates, 30 ticks)
+	check(whereCalls() <= 30, "where() per plate: " .. whereCalls())
+	-- looting the same spawn's corpse doesn't count it again
+	stub("GetNumLootItems", function() return 1 end)
+	stub("GetLootSlotLink", function() return "|Hitem:2589:|h[Linen Cloth]|h" end)
+	stub("GetLootSourceInfo", function() return "Creature-0-1-2-3-6-0000AA0001", 1 end)
+	stub("IsFishingLoot", function() return false end)
+	stub("GetMoney", function() return 0 end)
+	MOCK.Fire("LOOT_OPENED")
+	MOCK.Fire("LOOT_CLOSED")
+	check(cells["400:600"] == 2, "corpse counted the spawn again: " .. cells["400:600"])
+	unstubAll()
+end)
+
+step("spawns: counts inflated by older versions become 1 once (sightings stay sightings)", function()
+	local data = { npc = {
+		[1] = { p = { [1429] = { n = 3, ["10:10"] = 408, ["15:10"] = 1, ["20:20"] = 7 } } },
+		[2] = { p = { [229] = { n = 40 } } },   -- an instance, no positions
+	}, obj = { [3] = { p = { [1429] = { n = 1, ["10:10"] = 5 } } } } }
+	ns.NormalizeSpots(data)
+	local c = data.npc[1].p[1429]
+	check(c["10:10"] == 1 and c["15:10"] == 1 and c["20:20"] == 1 and c.n == 3, "cells not capped")
+	check(data.npc[2].p[229].n == 1, "instance sightings: " .. data.npc[2].p[229].n)
+	check(data.obj[3].p[1429]["10:10"] == 5, "node loot counts touched")
+	data.npc[1].p[1429]["10:10"] = 2
+	check(ns.NormalizeSpots(data) == 0 and data.npc[1].p[1429]["10:10"] == 2, "normalized twice")
+	check(EverlookDBData.spotFormat == 2, "the real data file not marked")
+end)
+
+step("seen sets stay bounded and remember the newest keys", function()
+	local s = ns.SeenSet(3)
+	for i = 1, 10 do s.add(i) end
+	check(s.has(10) and s.has(9) and s.has(7) and not s.has(1), "wrong keys kept")
+end)
+
 step("status names the beasts", function()
 	MOCK.log = {}
 	SlashCmdList.EVERLOOKDB("status")

@@ -107,28 +107,83 @@ local function instanceMap()
   if itype and itype ~= "none" then return mapID, difficulty end
 end
 
--- add a position to rec.p[map] as a grid cell "x:y" -> times seen
-local function addSpot(rec, map, x, y)
+-- A set of keys seen this session that never grows past about 2 * limit: when the newest half fills up, the
+-- older half is dropped. A key seen again is kept in the newest half.
+local function seenSet(limit)
+  local new, old, n = {}, {}, 0
+  local set = {}
+  function set.has(k) return new[k] or old[k] or false end
+  function set.add(k)
+    if new[k] then return end
+    if n >= limit then old, new, n = new, {}, 0 end
+    new[k], n = true, n + 1
+  end
+  return set
+end
+ns.SeenSet = seenSet
+
+-- Spawns (GUIDs) whose position was counted this session: each spawn counts once, however long you stand
+-- next to it (the nameplate scan sees it every second) and whether you then loot it or not.
+local spotCounted = seenSet(5000)
+
+-- add a position to rec.p[map] as a grid cell "x:y" -> times seen (each spawn once a session when guid is given)
+local function addSpot(rec, map, x, y, guid)
   if not map then return end
-  changes = changes + 1
+  if guid then
+    if spotCounted.has(guid) then return end
+    spotCounted.add(guid)
+  end
   rec.p = rec.p or {}
   local cells = rec.p[map]
   if not cells then cells = { n = 0 }; rec.p[map] = cells end
-  if not x then cells.n = cells.n + 1; return end  -- seen on this map, position unknown (instance)
+  if not x then cells.n = cells.n + 1; changes = changes + 1; return end  -- seen on this map, position unknown (instance)
   local key = math.floor(x / SPAWN_GRID) * SPAWN_GRID .. ":" .. math.floor(y / SPAWN_GRID) * SPAWN_GRID
   if cells[key] then
     cells[key] = cells[key] + 1
+    changes = changes + 1
   elseif cells.n < SPAWNS_PER_MAP then
     cells[key] = 1
     cells.n = cells.n + 1
+    changes = changes + 1
   end
 end
+
+-- Versions before 0.4.2 added 1 to an NPC's spot every second you stood next to it (one cell reached 408),
+-- so those counts are time spent nearby, not spawns. Once per data file each such count becomes 1 ("seen
+-- here"), and sightings without a position (instances) at most 1 per map. Loot spots of herbs, veins and
+-- chests were always counted once per node and are left alone.
+local SPOT_FORMAT = 2
+local function normalizeSpots(data)
+  if data.spotFormat == SPOT_FORMAT then return 0 end
+  local fixed = 0
+  for _, rec in pairs(data.npc or {}) do
+    if type(rec) == "table" and type(rec.p) == "table" then
+      for _, cells in pairs(rec.p) do
+        if type(cells) == "table" then
+          local positions = 0
+          for k, v in pairs(cells) do
+            if k ~= "n" then
+              positions = positions + 1
+              if type(v) == "number" and v > 1 then cells[k] = 1; fixed = fixed + 1 end
+            end
+          end
+          local unknown = (tonumber(cells.n) or positions) - positions
+          if unknown > 1 then fixed = fixed + 1; unknown = 1 end
+          cells.n = positions + math.max(unknown, 0)
+        end
+      end
+    end
+  end
+  data.spotFormat = SPOT_FORMAT
+  return fixed
+end
+ns.NormalizeSpots = normalizeSpots
 
 ---------------------------------------------------------------------------------------------------
 -- NPCs
 
 local scanned = {}  -- npc ids whose tooltip was read this session
-local levelCounted, levelCountedN = {}, 0  -- beast spawns (GUIDs) whose level was counted this session
+local levelCounted = seenSet(5000)  -- beast spawns (GUIDs) whose level was counted this session
 local recent = {}   -- name -> { id, level, at }: NPCs seen lately, to match "X dies, you gain N experience"
 local SKINNABLE = {}
 for _, g in ipairs({ "UNIT_SKINNABLE_LEATHER", "UNIT_SKINNABLE_HERB", "UNIT_SKINNABLE_ROCK", "UNIT_SKINNABLE_BOLTS" }) do
@@ -157,7 +212,8 @@ local function ownerTitle(text)
 end
 ns.OwnerTitle = ownerTitle
 
-local function readUnit(unit, near)
+-- here: { map, x, y } from where(), when the caller already has it (the nameplate scan reads it once a tick)
+local function readUnit(unit, near, here)
   if paused or not ok(UnitExists(unit)) or ok(UnitIsPlayer(unit)) then return end
   if ok(UnitPlayerControlled(unit)) then return end  -- pets and guardians
   -- companions and other players' pets carry a name and an owner line that a player chose or is
@@ -182,7 +238,8 @@ local function readUnit(unit, near)
     rec.hp[lvl] = math.max(rec.hp[lvl] or 0, hp)
   end
   -- every zone it shows up in, even without a position (nameplates reach further than "near")
-  local zone = where()
+  here = here or { where() }
+  local zone = here[1]
   if zone then
     rec.z = rec.z or {}
     if not rec.z[zone] then rec.z[zone] = 1; changes = changes + 1 end
@@ -191,11 +248,10 @@ local function readUnit(unit, near)
   rec.type = ok(UnitCreatureType(unit)) or rec.type          -- Beast, Humanoid, ... (client language)
   rec.family = ok(UnitCreatureFamily(unit)) or rec.family    -- Wolf, Spider, ...
   -- beasts: how many spawns were seen at each level (each spawn once a session), so a level spread shows
+  local guid = ok(UnitGUID(unit))
   if lvl and lvl > 0 and ok(UnitCreatureFamily(unit)) then
-    local guid = ok(UnitGUID(unit))
-    if guid and not levelCounted[guid] then
-      if levelCountedN > 5000 then levelCounted, levelCountedN = {}, 0 end
-      levelCounted[guid], levelCountedN = true, levelCountedN + 1
+    if guid and not levelCounted.has(guid) then
+      levelCounted.add(guid)
       rec.lvl = rec.lvl or {}
       rec.lvl[lvl] = (rec.lvl[lvl] or 0) + 1
       changes = changes + 1
@@ -221,10 +277,10 @@ local function readUnit(unit, near)
       end
     end
   end
-  if near then
-    local map, x, y = where()
+  if near and guid then
+    local map, x, y = here[1], here[2], here[3]
     if not x then map = instanceMap() or map end
-    addSpot(rec, map, x, y)
+    addSpot(rec, map, x, y, guid)
   end
   return rec, id
 end
@@ -237,9 +293,13 @@ end
 
 local function scanNameplates()
   if paused then return end
+  local here  -- the player's position, read once a tick and only when there are plates
   for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
     local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
-    if unit then readUnit(unit, isNear(unit)) end
+    if unit then
+      here = here or { where() }
+      readUnit(unit, isNear(unit), here)
+    end
   end
 end
 
@@ -340,7 +400,7 @@ local function readLoot()
         moneySources[#moneySources + 1] = rec
         -- where it was: corpses mark NPC spawns, objects mark node spawns
         if sk == "u" then
-          addSpot(npcRecord(id), x and map or inst or map, x, y)
+          addSpot(npcRecord(id), x and map or inst or map, x, y, guid)  -- not again when it was counted alive
         else
           local obj = db.obj[id]
           if not obj then obj = {}; db.obj[id] = obj end
@@ -605,6 +665,7 @@ local function init()
   for _, q in pairs(db.quest) do q.objective = nil end
   db.trainer = db.trainer or {}
   db.beast = db.beast or {}
+  normalizeSpots(db)
   settings = ns.InitSettings(db)
   paused = settings.paused and true or false
 
