@@ -316,7 +316,7 @@ local GATHER_SPELLS = {
 }
 local lastCast, lastCastAt = nil, 0
 local lastObjectName, lastObjectAt = nil, 0
-local looted = {}       -- "kind:guid" already counted this session
+local looted = seenSet(2000)  -- "kind..guid" already counted this session (the latest few thousand)
 local lootDone = false
 local moneyBefore, moneySources = 0, nil
 
@@ -387,8 +387,8 @@ local function readLoot()
     if sk then
       local kind = lootKind(sk)
       local seenKey = kind .. guid
-      if not looted[seenKey] then
-        looted[seenKey] = true
+      if not looted.has(seenKey) then
+        looted.add(seenKey)
         local key = kind .. ":" .. id
         local rec = lootRecord(key)
         rec.n = rec.n + 1

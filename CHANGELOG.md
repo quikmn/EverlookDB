@@ -6,6 +6,7 @@
 - Lighter while you play: your position is read once a second for all nameplates together, not once per nameplate.
 - Vendors: a vendor's list is read once when you open it, and a second time only when some items were still loading.
 - Quests: handing in a quest no longer runs into an error when the game hides the quest's XP or money from addons; the hand-in is still counted.
+- Long play sessions: the list of corpses and nodes already looted no longer grows all session; it keeps the latest few thousand.
 
 ## v0.4.1 (2026-11-18)
 
