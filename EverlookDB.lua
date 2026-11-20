@@ -4,7 +4,8 @@
 --            when you are next to them), the XP a solo kill gave, and services (flight master, banker, trainer, ...)
 --   trainers what each trainer teaches, for how much, from which level
 --   vendors  what each vendor sells, for how much, and whether stock is limited
---   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards, XP
+--   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
+--            (items, choices, currencies), XP, and what turning it in actually gave (currencies, items)
 --   beasts   (hunters, Beasts.lua) what a freshly tamed pet knows and what Beast Lore shows, by the beast's npc id
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
@@ -475,6 +476,15 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Quests
 
+-- a chat format of the game's ("You receive item: %s.") as a Lua pattern that captures its values
+local function toPattern(fmt)
+  if type(fmt) ~= "string" then return nil end
+  -- escape magic characters, then %s / %1$s -> (.-) and %d / %2$d -> (%d+)
+  local p = fmt:gsub("([%(%)%.%[%]%*%+%-%?%^%$])", "%%%1")
+  p = p:gsub("%%%d?%%?%$?s", "(.-)"):gsub("%%%d?%%?%$?d", "(%%d+)")
+  return "^" .. p .. "$"
+end
+
 local function questRecord(qid)
   changes = changes + 1
   local q = db.quest[qid]
@@ -492,23 +502,60 @@ local function questParty(startItem)
   end
 end
 
+-- a plain number, or nil (hidden values and anything else are unknown)
+local function num(v)
+  v = ok(v)
+  return type(v) == "number" and v or nil
+end
+
+-- "id x count" of the items a quest window lists; the second result says some item was still loading
 local function links(kind, count)
-  local out = {}
-  for i = 1, count or 0 do
-    local id = itemID(GetQuestItemLink(kind, i))
-    if id then
-      local _, _, n = safe(GetQuestItemInfo, kind, i)
-      out[#out + 1] = id .. "x" .. (n or 1)
+  local out, missing = {}, false
+  count = num(count) or 0
+  for i = 1, math.min(count, 12) do
+    local _, _, n, _, _, infoID = safe(GetQuestItemInfo, kind, i)
+    local id = itemID(safe(GetQuestItemLink, kind, i)) or num(infoID)  -- (retail's 6th value is the item id)
+    if id and id > 0 then
+      out[#out + 1] = id .. "x" .. (num(n) or 1)
+    else
+      missing = true
     end
+  end
+  return #out > 0 and table.concat(out, ",") or nil, missing
+end
+
+-- "id x amount" of the currencies the reward window lists (Merchant's Favor: "3402x10")
+local MAX_LISTED_CURRENCIES = 8
+local function rewardCurrencies()
+  local out = {}
+  for i = 1, math.min(num(safe(GetNumRewardCurrencies)) or 0, MAX_LISTED_CURRENCIES) do
+    local id, amount
+    if C_QuestOffer and C_QuestOffer.GetQuestRewardCurrencyInfo then
+      local info = safe(C_QuestOffer.GetQuestRewardCurrencyInfo, "reward", i)
+      if type(info) == "table" then
+        id, amount = num(info.currencyID), num(info.totalRewardAmount) or num(info.baseRewardAmount)
+      end
+    end
+    if not id and GetQuestCurrencyID then id = num(safe(GetQuestCurrencyID, "reward", i)) end
+    if not amount and GetQuestCurrencyInfo then
+      local _, _, n = safe(GetQuestCurrencyInfo, "reward", i)
+      amount = num(n)
+    end
+    if id and amount and id > 0 and amount > 0 then out[#out + 1] = id .. "x" .. amount end
   end
   return #out > 0 and table.concat(out, ",") or nil
 end
 
+-- what the window lists; true when a reward item was still loading (read again a moment later)
 local function readRewards(q)
-  q.reward = links("reward", GetNumQuestRewards()) or q.reward
-  q.choice = links("choice", GetNumQuestChoices()) or q.choice
-  local money = ok(GetRewardMoney())
+  local reward, m1 = links("reward", safe(GetNumQuestRewards))
+  local choice, m2 = links("choice", safe(GetNumQuestChoices))
+  q.reward = reward or q.reward
+  q.choice = choice or q.choice
+  q.currency = rewardCurrencies() or q.currency
+  local money = num(safe(GetRewardMoney))
   if money and money > 0 then q.money = money end
+  return m1 or m2
 end
 
 local function questDetail(startItem)
@@ -565,8 +612,120 @@ local function questComplete()
   q.to = questParty() or q.to
   local map, x, y = where()
   if map and x then q.toAt = map .. ":" .. x .. ":" .. y end
-  readRewards(q)
+  if readRewards(q) then
+    C_Timer.After(0.5, function()
+      if not paused and ok(GetQuestID()) == qid then readRewards(q) end
+    end)
+  end
 end
+
+---------------------------------------------------------------------------------------------------
+-- What a turn-in actually gave: for a few seconds after QUEST_TURNED_IN, currency gains (CURRENCY_DISPLAY_UPDATE,
+-- or the chat line when that has no amount) and "You receive item" lines go to that quest. Bonus rewards (a
+-- Performance Bonus on top of the Merchant's Favor) show up as a spread of amounts:
+--   q.got = { n = turn-ins watched, c = { [currency] = { [amount] = times } }, i = { [item] = { [count] = times } } }
+-- Gains a moment before the turn-in event (the game may send them first) count too. A second turn-in closes the
+-- first one's window. No combat log: only these events and the player's own chat lines.
+
+local GOT_WINDOW = 3        -- seconds after the turn-in
+local GOT_BEFORE = 1        -- seconds before it
+local GOT_CURRENCIES, GOT_ITEMS, GOT_AMOUNTS = 8, 16, 24
+local watch                 -- { q = quest id, ends = time, c = {}, cc = {}, i = {} }
+local early = {}            -- gains with no window yet: { at, kind, id, n }
+
+local function addGain(w, kind, id, n)
+  w[kind][id] = (w[kind][id] or 0) + n
+end
+
+local function gain(kind, id, n)
+  if paused or not id or not n or id <= 0 or n <= 0 then return end
+  local now = GetTime()
+  if watch and now <= watch.ends then addGain(watch, kind, id, n); return end
+  while early[1] and now - early[1].at > GOT_BEFORE do table.remove(early, 1) end
+  if #early < 20 then early[#early + 1] = { at = now, kind = kind, id = id, n = n } end
+end
+
+local function spread(into, id, amount, maxIds)
+  local d = into[id]
+  if not d then
+    local ids = 0
+    for _ in pairs(into) do ids = ids + 1 end
+    if ids >= maxIds then return end
+    d = {}; into[id] = d
+  end
+  if d[amount] then d[amount] = d[amount] + 1
+  else
+    local amounts = 0
+    for _ in pairs(d) do amounts = amounts + 1 end
+    if amounts < GOT_AMOUNTS then d[amount] = 1 end
+  end
+end
+
+local function closeWatch()
+  local w = watch
+  watch = nil
+  if not w or not db then return end
+  local q = db.quest[w.q]
+  if not q then return end
+  local got = q.got or {}
+  q.got = got
+  got.n = (got.n or 0) + 1
+  for id, n in pairs(w.c) do got.c = got.c or {}; spread(got.c, id, n, GOT_CURRENCIES) end
+  for id, n in pairs(w.cc) do  -- the chat line only for currencies the update event gave no amount for
+    if not w.c[id] then got.c = got.c or {}; spread(got.c, id, n, GOT_CURRENCIES) end
+  end
+  for id, n in pairs(w.i) do got.i = got.i or {}; spread(got.i, id, n, GOT_ITEMS) end
+  changes = changes + 1
+end
+ns.CloseRewardWatch = closeWatch
+
+local function watchTurnIn(qid)
+  closeWatch()
+  local now = GetTime()
+  local w = { q = qid, ends = now + GOT_WINDOW, c = {}, cc = {}, i = {} }
+  for _, e in ipairs(early) do
+    if now - e.at <= GOT_BEFORE then addGain(w, e.kind, e.id, e.n) end
+  end
+  early = {}
+  watch = w
+  C_Timer.After(GOT_WINDOW + 0.1, function() if watch == w then closeWatch() end end)
+end
+
+-- CURRENCY_DISPLAY_UPDATE: (currencyID, quantity, quantityChange, ...); only plain numbers are compared
+local function currencyUpdate(id, _, change)
+  gain("c", num(id), num(change))
+end
+
+-- the player's own chat lines: "You receive item: [x]x2." and "You receive currency: [Merchant's Favor] x10."
+local ITEM_PUSHED = toPattern(_G.LOOT_ITEM_PUSHED_SELF)
+local ITEM_PUSHED_N = toPattern(_G.LOOT_ITEM_PUSHED_SELF_MULTIPLE)
+local CURRENCY_GOT = toPattern(_G.CURRENCY_GAINED)
+local CURRENCY_GOT_N = toPattern(_G.CURRENCY_GAINED_MULTIPLE)
+local CURRENCY_GOT_BONUS = toPattern(_G.CURRENCY_GAINED_MULTIPLE_BONUS)
+
+local function chatGain(text, one, many, linkKind)
+  local link, n
+  if many then link, n = text:match(many) end
+  if not link and one then link = text:match(one); n = link and 1 end
+  if not link then return nil end
+  return tonumber(link:match(linkKind .. ":(%d+)")), tonumber(n)
+end
+
+local function lootLine(text)
+  text = ok(text)
+  if paused or type(text) ~= "string" then return end
+  local id, n = chatGain(text, ITEM_PUSHED, ITEM_PUSHED_N, "item")
+  if id then gain("i", id, n) end
+end
+
+local function currencyLine(text)
+  text = ok(text)
+  if paused or type(text) ~= "string" then return end
+  local id, n = chatGain(text, CURRENCY_GOT, CURRENCY_GOT_N, "currency")
+  if not id and CURRENCY_GOT_BONUS then id, n = chatGain(text, nil, CURRENCY_GOT_BONUS, "currency") end
+  if id then gain("cc", id, n) end
+end
+ns.ChatGain = chatGain
 
 ---------------------------------------------------------------------------------------------------
 -- Services and trainers: what an NPC does when you talk to it
@@ -603,13 +762,6 @@ end
 ---------------------------------------------------------------------------------------------------
 -- XP from kills: "Boar dies, you gain 85 experience." (solo only, so it is the mob's own XP)
 
-local function toPattern(fmt)
-  if type(fmt) ~= "string" then return nil end
-  -- escape magic characters, then %s / %1$s -> (.-) and %d / %2$d -> (%d+)
-  local p = fmt:gsub("([%(%)%.%[%]%*%+%-%?%^%$])", "%%%1")
-  p = p:gsub("%%%d?%%?%$?s", "(.-)"):gsub("%%%d?%%?%$?d", "(%%d+)")
-  return "^" .. p .. "$"
-end
 local XP_PLAIN = toPattern(_G.COMBATLOG_XPGAIN_FIRSTPERSON)     -- %s dies, you gain %d experience.
 local XP_RESTED = toPattern(_G.COMBATLOG_XPGAIN_EXHAUSTION1)    -- ... (%s exp %s bonus)
 
@@ -763,7 +915,11 @@ local handlers = {
       q.xp[pl] = xp   -- player level -> XP (quests give less when you outlevel them)
     end
     if money and money > 0 then q.money = money end
+    watchTurnIn(qid)
   end,
+  CURRENCY_DISPLAY_UPDATE = currencyUpdate,
+  CHAT_MSG_LOOT = lootLine,
+  CHAT_MSG_CURRENCY = currencyLine,
 }
 for event in pairs(handlers) do pcall(f.RegisterEvent, f, event) end
 f:SetScript("OnEvent", function(_, event, ...)

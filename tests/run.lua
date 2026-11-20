@@ -30,6 +30,9 @@ CORPSE_TOOLTIP = "Corpse of %s"
 UNITNAME_TITLE_COMPANION, UNITNAME_TITLE_PET = "%s's Companion", "%s's Pet"
 MOCK.reloads = 0
 C_UI = { Reload = function() MOCK.reloads = MOCK.reloads + 1 end }
+LOOT_ITEM_PUSHED_SELF, LOOT_ITEM_PUSHED_SELF_MULTIPLE = "You receive item: %s.", "You receive item: %sx%d."
+CURRENCY_GAINED, CURRENCY_GAINED_MULTIPLE = "You receive currency: %s.", "You receive currency: %s x%d."
+CURRENCY_GAINED_MULTIPLE_BONUS = "You receive currency: %s x%d. (Bonus Objective)"
 
 local globalWrites = {}
 local addonEnv = setmetatable({}, { __index = _G, __newindex = function(_, k, v) globalWrites[k] = true; _G[k] = v end })
@@ -205,6 +208,105 @@ step("quest turn-in: XP and money the game hides are skipped, not compared", fun
 	MOCK.Fire("QUEST_TURNED_IN", 95812, MOCK.Secret(900), MOCK.Secret(50))
 	local q = EverlookDBData.quest[95812]
 	check(q and q.done == 1 and q.xp == nil and q.money == nil, "hidden values saved or turn-in lost")
+end)
+
+local FAVOR = "|cffffffff|Hcurrency:3402:0|h[Merchant's Favor]|h|r"
+local function itemLink(id) return "|cff1eff00|Hitem:" .. id .. "::::::::60:::::|h[Thing]|h|r" end
+local function crateWindow(qid)
+	local realGUID = UnitGUID
+	UnitGUID = function(u) if u == "npc" then return "Creature-0-1-2-3-256390-0000ABCD" end return realGUID(u) end
+	GetQuestID = function() return qid end
+	GetTitleText = function() return "A Sealed Crate" end
+	MOCK.Fire("QUEST_COMPLETE")
+	UnitGUID = realGUID
+end
+
+step("reward window: listed currencies, and reward items whose link is still loading (by the item id)", function()
+	GetNumQuestRewards, GetNumQuestChoices, GetRewardMoney = function() return 1 end, function() return 0 end, function() return 750 end
+	GetQuestItemLink = function() return nil end
+	GetQuestItemInfo = function(kind, i) if kind == "reward" and i == 1 then return "Bag", 1, 2, 1, true, 248800 end end
+	GetNumRewardCurrencies = function() return 1 end
+	C_QuestOffer = { GetQuestRewardCurrencyInfo = function(kind, i)
+		if kind == "reward" and i == 1 then return { currencyID = 3402, totalRewardAmount = 10, baseRewardAmount = 10 } end
+	end }
+	crateWindow(91901)
+	local q = EverlookDBData.quest[91901]
+	check(q.currency == "3402x10", "listed currency: " .. tostring(q.currency))
+	check(q.reward == "248800x2" and q.money == 750, "listed item or money: " .. tostring(q.reward) .. " " .. tostring(q.money))
+	-- the older API, and a hidden amount is left out, not compared
+	C_QuestOffer = nil
+	GetQuestCurrencyID = function() return 3402 end
+	GetQuestCurrencyInfo = function() return "Merchant's Favor", 1, MOCK.Secret(10), 1 end
+	crateWindow(91904)
+	check(EverlookDBData.quest[91904].currency == nil, "hidden currency amount saved")
+	GetQuestCurrencyInfo = function() return "Merchant's Favor", 1, 15, 1 end
+	crateWindow(91904)
+	check(EverlookDBData.quest[91904].currency == "3402x15", "older API: " .. tostring(EverlookDBData.quest[91904].currency))
+	GetNumRewardCurrencies, GetQuestCurrencyID, GetQuestCurrencyInfo = nil, nil, nil
+	GetNumQuestRewards, GetRewardMoney = function() return 0 end, function() return 0 end
+	MOCK.RunTimers()
+end)
+
+step("turn-in: what it really gave goes to the quest, bonus amounts as a spread", function()
+	MOCK.RunTimers() -- no window open
+	local q = EverlookDBData.quest[91901]
+	q.got = nil
+	MOCK.Fire("QUEST_TURNED_IN", 91901, 0, 750)
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 110, 10)
+	MOCK.Fire("CHAT_MSG_CURRENCY", "You receive currency: " .. FAVOR .. " x10.")  -- the same gain again: not counted twice
+	MOCK.Fire("CHAT_MSG_LOOT", "You receive item: " .. itemLink(248801) .. "x3.")
+	MOCK.Fire("CHAT_MSG_LOOT", "You receive loot: " .. itemLink(2589) .. ".")     -- looting, not the quest
+	MOCK.time = MOCK.time + 1
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 111, 1)                              -- Performance Bonus
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 101, -10)                            -- spent: not a reward
+	MOCK.RunTimers()
+	check(q.got and q.got.n == 1, "turn-in not watched")
+	check(q.got.c[3402][11] == 1 and q.got.c[3402][10] == nil, "Favor with bonus: " .. tostring(q.got.c[3402][11]))
+	check(q.got.i[248801][3] == 1 and q.got.i[2589] == nil, "received items")
+	-- the next one: the gain arrives just before the event; one after the window is not the quest's
+	MOCK.time = MOCK.time + 10
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 121, 10)
+	MOCK.time = MOCK.time + 0.5
+	MOCK.Fire("QUEST_TURNED_IN", 91901, 0, 750)
+	MOCK.time = MOCK.time + 5
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 131, 10)
+	MOCK.RunTimers()
+	check(q.got.n == 2 and q.got.c[3402][10] == 1 and q.got.c[3402][11] == 1, "second turn-in: " .. tostring(q.got.c[3402][10]))
+	-- an old gain (long before) is not taken
+	MOCK.time = MOCK.time + 10
+	MOCK.Fire("QUEST_TURNED_IN", 91901, 0, 750)
+	MOCK.RunTimers()
+	check(q.got.n == 3 and q.got.c[3402][10] == 1, "a gain from before the window counted")
+end)
+
+step("turn-in: a hidden amount is not compared; the chat line stands in for it", function()
+	local q = EverlookDBData.quest[91904]
+	MOCK.Fire("QUEST_TURNED_IN", 91904, 0, 500)
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, MOCK.Secret(140), MOCK.Secret(12))
+	MOCK.Fire("CHAT_MSG_CURRENCY", "You receive currency: " .. FAVOR .. " x12.")
+	MOCK.Fire("CHAT_MSG_CURRENCY", MOCK.Secret("You receive currency: " .. FAVOR .. " x99."))
+	MOCK.Fire("CHAT_MSG_LOOT", "You receive item: " .. itemLink(248802) .. ".")
+	MOCK.RunTimers()
+	check(q.got.n == 1 and q.got.c[3402][12] == 1, "chat fallback")
+	check(q.got.i[248802][1] == 1, "single item line")
+	-- a second turn-in closes the first one's window at once
+	MOCK.Fire("QUEST_TURNED_IN", 91904, 0, 500)
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 150, 10)
+	MOCK.Fire("QUEST_TURNED_IN", 91901, 0, 750)
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 165, 15)
+	MOCK.RunTimers()
+	check(q.got.n == 2 and q.got.c[3402][10] == 1, "first window")
+	check(EverlookDBData.quest[91901].got.c[3402][15] == 1, "second window")
+end)
+
+step("turn-in: nothing is watched while recording is paused", function()
+	local q = EverlookDBData.quest[91904]
+	ns.SetPaused(true)
+	MOCK.Fire("QUEST_TURNED_IN", 91904, 0, 500)
+	MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 175, 10)
+	MOCK.RunTimers()
+	ns.SetPaused(false)
+	check(q.got.n == 2 and q.got.c[3402][10] == 1, "watched while paused")
 end)
 
 step("settings from the save pop-up's time lose its options", function()

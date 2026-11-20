@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Quests: the reward window's currencies (such as Merchant's Favor) are noted next to its items, and reward items that are still loading are no longer missed. For a few seconds after you hand a quest in, the currencies and items you actually receive are counted for that quest, so bonus rewards (a Performance Bonus on a Sealed Crate) show how often each amount comes.
+
 ## v0.5.0 (2026-11-20)
 - Settings window: switches, buttons and sliders use a softer shade of the accent colour, an on switch has a dark knob so it stands out, and boxes have cleaner rounded edges.
 
