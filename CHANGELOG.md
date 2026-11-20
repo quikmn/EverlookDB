@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.5.0 (2026-11-20)
 - Settings window: switches, buttons and sliders use a softer shade of the accent colour, an on switch has a dark knob so it stands out, and boxes have cleaner rounded edges.
 
 - NPC spawn spots: a creature you stand next to now counts once per play session, not once every second you stay near it, so the site's spawn maps show where creatures really stand instead of where you waited longest. Spots counted the old way in your data file are set to "seen here" once, the next time you log in.
