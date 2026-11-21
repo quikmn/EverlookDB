@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.6.1 (2026-11-21)
 
 - Safer counting after the latest WoW Forever update. Since that update, the game scrambles part of the ID it gives each creature. If a creature's ID ever changes while you look at it, the addon stops relying on those IDs for the rest of the session. It then counts by NPC, spot and time instead, so one creature, corpse or node is never counted twice. When it can't tell two creatures apart, it counts one.
 - A creature ID in a shape the addon doesn't know is skipped instead of being saved with the wrong NPC.
