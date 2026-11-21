@@ -1,5 +1,11 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Safer counting after the latest WoW Forever update. Since that update, the game scrambles part of the ID it gives each creature. If a creature's ID ever changes while you look at it, the addon stops relying on those IDs for the rest of the session. It then counts by NPC, spot and time instead, so one creature, corpse or node is never counted twice. When it can't tell two creatures apart, it counts one.
+- A creature ID in a shape the addon doesn't know is skipped instead of being saved with the wrong NPC.
+- A small health check runs when you log in. It notes your game build, the addon version, whether the game's realm, ID and item info work, and whether any game functions are missing or failing. It saves only yes/no answers and counts, never a name, a realm or an ID. The site uses it to hold data from a broken game update back until it has been checked.
+
 ## v0.6.0 (2026-11-21)
 
 - Quests: the reward window's currencies (such as Merchant's Favor) are noted next to its items, and reward items that are still loading are no longer missed. For a few seconds after you hand a quest in, the currencies and items you actually receive are counted for that quest, so bonus rewards (a Performance Bonus on a Sealed Crate) show how often each amount comes.
