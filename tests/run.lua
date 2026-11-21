@@ -598,6 +598,127 @@ step("status names the beasts", function()
 	check(table.concat(MOCK.log, " "):find("Beast abilities: 2 beasts (1 tames, 2 Beast Lore reads)", 1, true), table.concat(MOCK.log, " / "))
 end)
 
+-- A loot window: { [guid] = { item ids } }, one slot per item
+local function openLoot(sources)
+	local slots = {}
+	for guid, items in pairs(sources) do
+		for _, id in ipairs(items) do slots[#slots + 1] = { guid = guid, id = id } end
+	end
+	stub("GetNumLootItems", function() return #slots end)
+	stub("GetLootSlotLink", function(i) return "|Hitem:" .. slots[i].id .. ":|h[x]|h" end)
+	stub("GetLootSourceInfo", function(i) return slots[i].guid, 1 end)
+	stub("IsFishingLoot", function() return false end)
+	stub("GetMoney", function() return 0 end)
+	MOCK.Fire("LOOT_READY")
+	MOCK.Fire("LOOT_OPENED")
+	MOCK.Fire("LOOT_CLOSED")
+end
+
+step("loot: a skinning cast counts for one loot window, not the next corpse looted soon after", function()
+	local L = EverlookDBData.loot
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", nil, 8613)  -- Skinning (Spell8613 in the mock)
+	openLoot({ ["Creature-0-1-2-3-113-0000C00001"] = { 2318 } })
+	MOCK.time = MOCK.time + 1
+	openLoot({ ["Creature-0-1-2-3-113-0000C00002"] = { 2672 } })
+	check(L["s:113"] and L["s:113"].n == 1 and L["s:113"].i[2318], "skinning not counted")
+	check(L["u:113"] and L["u:113"].i[2672] and not L["s:113"].i[2672], "the next corpse counted as skinned")
+	unstubAll()
+end)
+
+step("loot: a world object's name is the tooltip just before it, never an older one", function()
+	stub("GameTooltipTextLeft1", { GetText = function() return MOCK.tip end })
+	GameTooltip.GetOwner = function() return UIParent end
+	local show = GameTooltip:GetScript("OnShow")
+	MOCK.tip = "Chair"; show(GameTooltip)
+	MOCK.tip = MOCK.Secret("Doan's Strongbox"); show(GameTooltip)    -- hidden in an instance
+	openLoot({ ["GameObject-0-1-2-3-103821-0000D00001"] = { 7146 } })
+	check(EverlookDBData.obj[103821] and EverlookDBData.obj[103821].name == nil, "an older tooltip named the object")
+	MOCK.tip = "Solid Chest"; show(GameTooltip)
+	openLoot({ ["GameObject-0-1-2-3-2855-0000D00002"] = { 1710 } })
+	MOCK.time = MOCK.time + 2
+	openLoot({ ["GameObject-0-1-2-3-2689-0000D00003"] = { 4483 } })
+	check(EverlookDBData.obj[2855].name == "Solid Chest", "object name")
+	check(EverlookDBData.obj[2689].name == nil, "a name used twice")
+	GameTooltip.GetOwner = nil
+	unstubAll()
+end)
+
+step("vendor: a currency cost is saved by its id, which the site reads; older saved names are fixed", function()
+	stub("UnitGUID", function(u) if u == "npc" then return "Creature-0-1-2-3-256730-0000BB0002" end end)
+	stub("UnitExists", function() return false end)
+	stub("UnitReaction", function() return 5 end)
+	stub("GetMerchantNumItems", function() return 2 end)
+	stub("GetMerchantItemLink", function(slot) return "|Hitem:" .. (251418 + slot) .. ":|h[x]|h" end)
+	stub("C_MerchantFrame", { GetItemInfo = function() return { price = 0, stackCount = 1, numAvailable = -1, hasExtendedCost = true } end })
+	stub("GetMerchantItemCostInfo", function() return 1 end)
+	stub("GetMerchantItemCostItem", function(slot)
+		if slot == 1 then return 1, 60, nil, "Merchant's Favor" end   -- a currency: only its name
+		return 1, 2, "|Hitem:2589:|h[Linen Cloth]|h", nil
+	end)
+	stub("C_CurrencyInfo", {
+		GetCurrencyListSize = function() return 2 end,
+		GetCurrencyListInfo = function(i) return ({ { name = "Miscellaneous", isHeader = true }, { name = "Merchant's Favor" } })[i] end,
+		GetCurrencyListLink = function(i) if i == 2 then return "|Hcurrency:3402:0|h[Merchant's Favor]|h" end end,
+	})
+	MOCK.Fire("MERCHANT_SHOW")
+	MOCK.Fire("MERCHANT_CLOSED")
+	runTimers(3)
+	local v = EverlookDBData.vendor[256730].i
+	check(v[251419].cost == "currency:3402x60", "currency cost: " .. tostring(v[251419].cost))
+	check(v[251420].cost == "item:2589x2", "item cost: " .. tostring(v[251420].cost))
+	local data = { vendor = { [1] = { i = { [5] = { cost = "currency:Merchant's Favorx200" }, [6] = { cost = "currency:Honor Pointsx5" } } } } }
+	check(ns.FixVendorCosts(data) == 1, "older costs not fixed")
+	check(data.vendor[1].i[5].cost == "currency:3402x200" and data.vendor[1].i[6].cost == "currency:Honor Pointsx5", "fixed wrongly")
+	unstubAll()
+end)
+
+step("quests: a hand-in window notes the title; an objective still loading doesn't replace a full list", function()
+	GetQuestID = function() return 7791 end
+	GetTitleText = function() return "A Donation of Wool" end
+	stub("GetNumQuestItems", function() return 1 end)
+	stub("GetQuestItemLink", function() return "|Hitem:2592:|h[Wool Cloth]|h" end)
+	stub("GetQuestItemInfo", function() return "Wool Cloth", 1, 60 end)
+	MOCK.Fire("QUEST_PROGRESS")
+	local q = EverlookDBData.quest[7791]
+	check(q.title == "A Donation of Wool" and q.needs == "2592x60", "hand-in: " .. tostring(q.title) .. " " .. tostring(q.needs))
+	local text = ""
+	stub("C_QuestLog", {
+		GetLogIndexForQuestID = function() return 1 end,
+		GetInfo = function() return { title = "Bounty", level = 10 } end,
+		GetQuestObjectives = function() return { { type = "item", numRequired = 8, text = text } } end,
+	})
+	MOCK.Fire("QUEST_ACCEPTED", 5545)
+	check(EverlookDBData.quest[5545].objectives == nil, "an empty objective saved")
+	text = "0/8 Bundle of Wood"
+	runTimers(2)
+	check(EverlookDBData.quest[5545].objectives[1] == "item|8|Bundle of Wood", "objective after loading: " .. tostring(EverlookDBData.quest[5545].objectives))
+	text = ""
+	MOCK.Fire("QUEST_ACCEPTED", 5545)
+	runTimers(2)
+	check(EverlookDBData.quest[5545].objectives[1] == "item|8|Bundle of Wood", "full list replaced")
+	unstubAll()
+end)
+
+step("buying from a merchant right after a hand-in is not a quest reward", function()
+	local q = EverlookDBData.quest[91904]
+	stub("GetMerchantNumItems", function() return 0 end)
+	MOCK.Fire("QUEST_TURNED_IN", 91904, 0, 500)
+	MOCK.Fire("MERCHANT_SHOW")
+	MOCK.Fire("CHAT_MSG_LOOT", "You receive item: " .. itemLink(159) .. "x5.")
+	MOCK.Fire("MERCHANT_CLOSED")
+	MOCK.RunTimers()
+	check(q.got.n == 3 and not q.got.i[159], "a purchase counted as a reward")
+	unstubAll()
+end)
+
+step("login drops saved titles that name an owner", function()
+	EverlookDBData.npc[248463] = { name = "Rumbler", title = "Nimsy's Pet" }
+	EverlookDBData.npc[1481] = { name = "Bart Tidewater", title = "Captain of the Maiden's Virtue" }
+	MOCK.Fire("PLAYER_LOGIN")
+	check(EverlookDBData.npc[248463].title == nil, "owner title kept")
+	check(EverlookDBData.npc[1481].title == "Captain of the Maiden's Virtue", "a real title dropped")
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)

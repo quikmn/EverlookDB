@@ -68,6 +68,7 @@ app:Section("status", "Status", function(stack)
   UI.Stat(stack, "Quests", N("quests"))
   UI.Stat(stack, "Beasts (hunters)", function()
     local beasts, tames, lore = ns.BeastStatus()
+    if beasts == 0 then return "none yet" end
     return beasts .. "  (" .. tames .. " tames, " .. lore .. " Beast Lore reads)"
   end)
   UI.Stat(stack, "Collecting since", function() local t = ns.Status().since; return t and date("%Y-%m-%d", t) or "-" end)

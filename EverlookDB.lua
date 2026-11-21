@@ -52,6 +52,11 @@ local function ok(v)
   if v == nil or isSecret(v) then return nil end
   return v
 end
+-- a plain number, or nil (hidden values and anything else are unknown)
+local function num(v)
+  v = ok(v)
+  return type(v) == "number" and v or nil
+end
 local function pack(...) return { n = select("#", ...), ... } end  -- WoW runs Lua 5.1: no table.pack
 local function safe(f, ...)
   local r = pack(pcall(f, ...))
@@ -232,7 +237,11 @@ local function readUnit(unit, near, here)
       rec.hi = math.max(rec.hi or lvl, lvl)
     end
   end
-  if rec.name then recent[rec.name] = { id = id, lvl = lvl, at = GetTime() } end
+  if rec.name then  -- updated in place: the nameplate scan passes here for every plate every second
+    local r = recent[rec.name]
+    if not r then r = {}; recent[rec.name] = r end
+    r.id, r.lvl, r.at = id, lvl, GetTime()
+  end
   local hp = ok(UnitHealthMax(unit))  -- hidden in some places; then unknown
   if lvl and lvl > 0 and hp and hp > 0 then
     rec.hp = rec.hp or {}
@@ -322,7 +331,7 @@ local lootDone = false
 local moneyBefore, moneySources = 0, nil
 
 local function lootKind(sourceKind)
-  if ok(IsFishingLoot()) then return "f" end
+  if safe(IsFishingLoot) then return "f" end
   if lastCast and GetTime() - lastCastAt < 4 then
     local k = GATHER[lastCast]
     if k == "p" or k == "s" then return k end
@@ -364,8 +373,9 @@ local function readLoot()
     end
   end
 
-  local fishing = ok(IsFishingLoot())
+  local fishing = safe(IsFishingLoot)
   if fishing then
+    lastCast = nil
     -- fishing has no mob or object: key it by zone map
     local map = where()
     local rec = lootRecord("f:" .. (map or 0))
@@ -405,13 +415,18 @@ local function readLoot()
         else
           local obj = db.obj[id]
           if not obj then obj = {}; db.obj[id] = obj end
+          -- the name is used once: a second object looted soon after must not take it too
           if lastObjectName and GetTime() - lastObjectAt < 15 then obj.name = lastObjectName end
+          lastObjectName = nil
           obj.kind = kind
           addSpot(obj, x and map or inst or map, x, y)
         end
       end
     end
   end
+  -- a skinning, gathering or pick pocket cast names one loot window only: the next corpse you loot within
+  -- a few seconds is a plain corpse again
+  lastCast = nil
   moneyBefore = GetMoney()
 end
 
@@ -431,6 +446,54 @@ end
 
 ---------------------------------------------------------------------------------------------------
 -- Vendors
+
+-- A currency's id, from its link ("currency:3402") or, as the merchant cost gives only its name, from the
+-- player's currency list. nil when unknown: the site takes only ids.
+local function currencyID(link, name)
+  link = ok(link)
+  local id = type(link) == "string" and tonumber(link:match("currency:(%d+)"))
+  if id then return id end
+  name = ok(name)
+  local C = C_CurrencyInfo
+  if type(name) ~= "string" or name == "" or type(C) ~= "table" or not C.GetCurrencyListInfo then return nil end
+  for i = 1, math.min(num(safe(C.GetCurrencyListSize)) or 0, 200) do
+    local info = safe(C.GetCurrencyListInfo, i)
+    if type(info) == "table" and ok(info.name) == name and not ok(info.isHeader) then
+      id = num(ok(info.currencyID))
+      if not id and C.GetCurrencyListLink then
+        local l = safe(C.GetCurrencyListLink, i)
+        id = type(l) == "string" and tonumber(l:match("currency:(%d+)"))
+      end
+      if id then return id end
+    end
+  end
+end
+ns.CurrencyID = currencyID
+
+-- Costs saved by 0.5.0 and older named a currency instead of giving its id ("currency:Merchant's Favorx200"),
+-- which the site can't read: put the id in when the player's currency list knows the name (else it stays as it
+-- is until a later login or the next visit to that vendor; the site skips it meanwhile).
+local function fixVendorCosts(data)
+  local fixed = 0
+  for _, v in pairs(data.vendor or {}) do
+    for _, e in pairs(type(v) == "table" and v.i or {}) do
+      if type(e) == "table" and type(e.cost) == "string" and e.cost:find("currency:%D") then
+        local parts, bad = {}, false
+        for part in e.cost:gmatch("[^,]+") do
+          local name, n = part:match("^currency:(.-)x(%d+)$")
+          if name and not tonumber(name) then
+            local id = currencyID(nil, name)
+            if id then part = "currency:" .. id .. "x" .. n else bad = true end
+          end
+          parts[#parts + 1] = part
+        end
+        if not bad then e.cost = table.concat(parts, ","); fixed = fixed + 1 end
+      end
+    end
+  end
+  return fixed
+end
+ns.FixVendorCosts = fixVendorCosts
 
 local function readVendor()
   if paused then return end
@@ -457,13 +520,17 @@ local function readVendor()
       end
       local e = { price = price, stack = stack, limited = (avail and avail >= 0) and 1 or nil, react = reaction }
       if extended then
+        -- "item:123x2,currency:3402x60"; left out when any part is unknown (a partial cost would read as cheaper)
         local costs = {}
-        for c = 1, (safe(GetMerchantItemCostInfo, slot) or 0) do
+        for c = 1, (num(safe(GetMerchantItemCostInfo, slot)) or 0) do
           local _, amount, link, currency = safe(GetMerchantItemCostItem, slot, c)
-          local cid = itemID(link)
-          costs[#costs + 1] = (cid and ("item:" .. cid) or ("currency:" .. tostring(currency))) .. "x" .. tostring(amount)
+          local cid, kind = itemID(link), "item"
+          if not cid then cid, kind = currencyID(link, currency), "currency" end
+          amount = num(amount)
+          if not cid or not amount or amount <= 0 then costs = nil; break end
+          costs[#costs + 1] = kind .. ":" .. cid .. "x" .. amount
         end
-        e.cost = table.concat(costs, ",")
+        e.cost = costs and #costs > 0 and table.concat(costs, ",") or nil
       end
       v.i[item] = e
     end
@@ -500,12 +567,6 @@ local function questParty(startItem)
     if kind == "u" then readUnit("npc", true) end
     return kind .. ":" .. id
   end
-end
-
--- a plain number, or nil (hidden values and anything else are unknown)
-local function num(v)
-  v = ok(v)
-  return type(v) == "number" and v or nil
 end
 
 -- "id x count" of the items a quest window lists; the second result says some item was still loading
@@ -573,8 +634,9 @@ local function questDetail(startItem)
   readRewards(q)
 end
 
-local function questAccepted(qid)
-  if paused or not qid then return end
+local function questAccepted(qid, retried)
+  qid = num(qid)
+  if paused or not qid or qid <= 0 then return end
   local q = questRecord(qid)
   local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
   local info = idx and safe(C_QuestLog.GetInfo, idx)
@@ -584,14 +646,24 @@ local function questAccepted(qid)
     q.group = ok(info.suggestedGroup) or q.group
   end
   local objectives = safe(C_QuestLog.GetQuestObjectives, qid)
-  if objectives and #objectives > 0 then
-    local out = {}
+  if type(objectives) == "table" and #objectives > 0 then
+    local out, loading = {}, false
     for _, o in ipairs(objectives) do
-      local text = noName(ok(o.text))
+      local text = type(o) == "table" and noName(ok(o.text))
       -- drop the player's progress ("3/10 ") so every upload reads the same
-      if text then out[#out + 1] = (o.type or "") .. "|" .. (o.numRequired or "") .. "|" .. text:gsub("^%d+/%d+%s*", "") end
+      text = type(text) == "string" and text:gsub("^%d+/%d+%s*", "") or ""
+      local otype, need = ok(o.type), num(o.numRequired)
+      if text ~= "" then
+        out[#out + 1] = (type(otype) == "string" and otype or "") .. "|" .. (need or "") .. "|" .. text
+      else
+        loading = true  -- an item objective whose item isn't loaded yet reads "" for a moment
+      end
     end
-    q.objectives = out
+    -- a list with a line still loading doesn't replace a complete one
+    if #out > 0 and (not loading or not q.objectives) then q.objectives = out end
+    if loading and not retried then
+      C_Timer.After(1, function() if not paused then questAccepted(qid, true) end end)
+    end
   end
 end
 
@@ -600,7 +672,9 @@ local function questProgress()
   local qid = ok(GetQuestID())
   if not qid or qid == 0 then return end
   local q = questRecord(qid)
-  q.needs = links("required", GetNumQuestItems()) or q.needs
+  -- repeatable hand-ins (bring 10 Linen Cloth) open here without a quest details window: the title too
+  q.title = noName(ok(GetTitleText())) or q.title
+  q.needs = links("required", safe(GetNumQuestItems)) or q.needs
 end
 
 local function questComplete()
@@ -711,9 +785,10 @@ local function chatGain(text, one, many, linkKind)
   return tonumber(link:match(linkKind .. ":(%d+)")), tonumber(n)
 end
 
+local merchantOpen = false   -- buying prints the same "You receive item" line: not a quest reward
 local function lootLine(text)
   text = ok(text)
-  if paused or type(text) ~= "string" then return end
+  if paused or merchantOpen or type(text) ~= "string" then return end
   local id, n = chatGain(text, ITEM_PUSHED, ITEM_PUSHED_N, "item")
   if id then gain("i", id, n) end
 end
@@ -818,6 +893,11 @@ local function init()
   db.trainer = db.trainer or {}
   db.beast = db.beast or {}
   normalizeSpots(db)
+  -- titles that name an owner ("Nimsy's Guardian") saved before 0.2.0 could name a player: drop them
+  for _, rec in pairs(db.npc) do
+    if type(rec) == "table" and type(rec.title) == "string" and ownerTitle(rec.title) then rec.title = nil end
+  end
+  fixVendorCosts(db)
   settings = ns.InitSettings(db)
   paused = settings.paused and true or false
 
@@ -842,9 +922,11 @@ GameTooltip:HookScript("OnShow", function(tip)
   if tip.GetUnit and safe(tip.GetUnit, tip) then return end
   if tip.GetItem and safe(tip.GetItem, tip) then return end
   local line = _G.GameTooltipTextLeft1
-  local text = noName(line and ok(line:GetText()))
+  local text = noName(line and safe(line.GetText, line))
   if text and isCorpse(text) then text = nil end
-  if text and text ~= "" then lastObjectName, lastObjectAt = text, GetTime() end
+  -- a world object whose name is hidden (instances) or not taken: forget the last one, or the chest you open
+  -- next would get the name of the chair you hovered before it
+  if text and text ~= "" then lastObjectName, lastObjectAt = text, GetTime() else lastObjectName = nil end
 end)
 
 ---------------------------------------------------------------------------------------------------
@@ -885,6 +967,7 @@ local handlers = {
   LOOT_OPENED = readLoot,
   LOOT_CLOSED = lootClosed,
   MERCHANT_SHOW = function()
+    merchantOpen = true
     -- uncached items arrive later: read again only when some were missing (0 is true in Lua)
     local missing = readVendor()
     if missing and missing > 0 and not paused then C_Timer.After(1.5, readVendor) end
@@ -899,6 +982,7 @@ local handlers = {
   CHAT_MSG_COMBAT_XP_GAIN = readKillXP,
   QUEST_DETAIL = questDetail,
   QUEST_ACCEPTED = function(a, b) questAccepted(b or a) end,  -- (questID) or (logIndex, questID)
+  MERCHANT_CLOSED = function() merchantOpen = false end,
   QUEST_PROGRESS = questProgress,
   QUEST_COMPLETE = questComplete,
   QUEST_TURNED_IN = function(qid, xp, money)
