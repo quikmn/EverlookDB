@@ -28,6 +28,7 @@ ns.SETTINGS_DEFAULTS = {
   version = 1,
   paused = false,
   savedMessage = true,      -- "data saved" in chat after a save
+  questSparkles = true,     -- keep the glitter on lootable quest objects (Sparkles.lua)
 }
 
 -- Settings from the saved table, missing ones from the defaults; moves `paused` out of the data file.

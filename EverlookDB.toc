@@ -11,4 +11,5 @@ Libs\EverlookUI\EverlookUI.lua
 EverlookDB.lua
 Health.lua
 Beasts.lua
+Sparkles.lua
 Options.lua

@@ -25,6 +25,13 @@ app:Setting({
   get = function() return S().savedMessage end, set = function(v) S().savedMessage = v end,
 })
 
+app:Setting({
+  key = "sparkles", type = "bool", label = "Show quest item sparkles",
+  desc = "Keeps the glitter on quest objects you can loot, even after a graphics preset turns it off.",
+  keywords = { "sparkle", "glitter", "shine", "quest item", "loot effect", "outline", "highlight", "graphics" },
+  get = function() return S().questSparkles end, set = function(v) ns.SetSparkles(v) end,
+})
+
 local function SetPaused(on)
   ns.SetPaused(on)
   app:Refresh()
@@ -104,15 +111,18 @@ app:Section("privacy", "Privacy", function(stack)
   UI.Note(stack, "Never recorded: your character, realm or account name, other players, chat, your gear or bags, or your pets' names.")
   UI.Note(stack, "Quest text the game fills in with your character's name is never saved. A player's corpse or your own name is never taken as the name of something you loot.")
   UI.Note(stack, "Your level is used only to note the lowest level a quest was offered at and the XP a kill or quest gave at your level.")
-  UI.Note(stack, "Your settings for this window (pause, the chat message, the window position) are kept apart from the recorded data; the site reads only the game facts.")
+  UI.Note(stack, "Your settings for this window (pause, the chat message, quest item sparkles and the outline mode to give back, the window position) are kept apart from the recorded data; the site reads only the game facts.")
   UI.Note(stack, "Uploads are merged with other players' into drop rates and maps. EverlookDB doesn't keep the file itself or anything that identifies you. More on everlookdb.com/privacy.html.")
 end)
 
 app:Section("options", "Options", function(stack)
   UI.Header(stack, "Saving")
   app:Widget(stack, "savedmessage")
+  UI.Header(stack, "Quest items")
+  app:Widget(stack, "sparkles")
+  UI.Note(stack, "It switches the unit outline off (Graphics > Outline Mode), because the game only shows the glitter without it. Turning this off gives your outline mode back; restart the game if the glitter stays.")
   UI.Header(stack, "Chat commands")
-  UI.Note(stack, "/edb  this window\n/edb off, /edb on  pause or resume recording\n/edb save  write the data file now (reloads the UI)\n/edb status  what's recorded, in chat\n/edb savedmessage off  change a setting (/edb get lists them)\n/edb search <words>  find a setting\n/edb feedback  a link for bugs and ideas\n/edb help  all of this in chat")
+  UI.Note(stack, "/edb  this window\n/edb off, /edb on  pause or resume recording\n/edb sparkles off  stop keeping quest item sparkles on\n/edb save  write the data file now (reloads the UI)\n/edb status  what's recorded, in chat\n/edb savedmessage off  change a setting (/edb get lists them)\n/edb search <words>  find a setting\n/edb feedback  a link for bugs and ideas\n/edb help  all of this in chat")
 end)
 
 -- /edb, also /everlookdb. Before PLAYER_LOGIN there is nothing to show yet.

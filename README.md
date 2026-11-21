@@ -14,6 +14,9 @@ A World of Warcraft: Forever addon that notes what you see while you play, so Ev
 - **Hunters, when you cast Beast Lore:** the lines Beast Lore adds to the beast's tooltip, exactly as the game shows them (abilities, diet, tameable and the like), the ability lines turned into spell ids, the beast (its NPC id) and its level, and how many times you read it.
 - With every file: the game's language, the game versions you played on, when the addon started recording, and when you last opened each vendor and trainer. Tames and Beast Lore reads are counted per game version and calendar week (for example `2026-W47`), never by day or time of day.
 
+## Quest item sparkles
+ Forever's graphics presets turn off the glitter on quest objects you can loot. The Collector keeps it on: at login and after any graphics change it sets `outlineModeShowLootEffectWhenDisabled` to 1 and the outline mode (`graphicsOutlineMode`, and the raid one) to off, since the game only shows the glitter without unit outlines. It's on by default. Untick **Show quest item sparkles** under Options, or `/edb sparkles off`, and it gives your outline mode back (High if it never saw another one); restart the game if the glitter stays. Written from the game's own settings, inspired by Forever Loot Sparkles.
+
 ## What it never records
 
 Your character, realm or account name, other players, chat, your gear or bags, and your pets' names. Your level is used only for the lowest level a quest was offered at and the XP a kill or quest gave. Nothing leaves your computer until you upload the file yourself (on the site or with the EverlookDB App).
@@ -26,6 +29,7 @@ Your character, realm or account name, other players, chat, your gear or bags, a
 - `/edb off` / `/edb on` (or `toggle`): pause and resume recording (`/edb pause` and `/edb resume` still work)
 - `/edb save`: write the data file now (reloads the UI)
 - `/edb status`: version, recording or paused, and what has been recorded so far
+- `/edb sparkles off` / `on`: quest item sparkles
 - `/edb savedmessage off`, or `/edb set savedmessage off`: change a setting; `/edb get` lists them
 - `/edb search <words>`: open the window with its search box filled
 - `/edb feedback`: a link for reporting bugs and ideas

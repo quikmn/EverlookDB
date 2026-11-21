@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Quest item sparkles: the glitter on quest objects you can loot stays on, even after a graphics preset or a graphics restart turns it off. The game only shows it with the unit outline off, so the addon turns that off too. It's on by default; untick it under Options (or /edb sparkles off) and your outline mode comes back (restart the game if the glitter stays).
+
 ## v0.6.1 (2026-11-21)
 
 - Safer counting after the latest WoW Forever update. Since that update, the game scrambles part of the ID it gives each creature. If a creature's ID ever changes while you look at it, the addon stops relying on those IDs for the rest of the session. It then counts by NPC, spot and time instead, so one creature, corpse or node is never counted twice. When it can't tell two creatures apart, it counts one.

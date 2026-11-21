@@ -926,6 +926,70 @@ step("health: saved with the data as words and counts, never a GUID, a name or t
 	resetTrust()
 end)
 
+step("quest item sparkles: on by default, kept on after a preset, the outline mode given back when turned off", function()
+	-- a game with the outline CVars at High and no loot effect; SetCVar fires CVAR_UPDATE like the game
+	local cv = { graphicsOutlineMode = "2", RAIDgraphicsOutlineMode = "1", outlineModeShowLootEffectWhenDisabled = "0" }
+	local sets = 0
+	stub("C_CVar", {
+		GetCVar = function(n) return cv[n] end,
+		SetCVar = function(n, v) sets = sets + 1; cv[n] = tostring(v); MOCK.Fire("CVAR_UPDATE", n, tostring(v)); return true end,
+	})
+	local s = EverlookDBSettings
+	s.questSparkles, s.sparkleOutline = nil, nil
+	ns.InitSettings(EverlookDBData)
+	check(s.questSparkles == true, "not on by default")
+	MOCK.Fire("PLAYER_LOGIN")
+	runTimers(3)
+	check(cv.graphicsOutlineMode == "0" and cv.RAIDgraphicsOutlineMode == "0" and cv.outlineModeShowLootEffectWhenDisabled == "1",
+		"not applied at login: " .. cv.graphicsOutlineMode .. cv.outlineModeShowLootEffectWhenDisabled)
+	check(ns.SparklesActive(), "not active")
+	check(s.sparkleOutline.graphicsOutlineMode == "2" and s.sparkleOutline.RAIDgraphicsOutlineMode == "1", "old outline modes not kept")
+	-- nothing is set when it is already right, and our own changes queue nothing
+	MOCK.timers = {}
+	sets = 0
+	ns.SparklesApply()
+	check(sets == 0, "set CVars that were already right")
+	ns.SetSparkles(true)
+	check(#MOCK.timers == 0, "our own CVar changes queued a re-apply")
+	-- a graphics preset sets both back (as the game does, without our SetCVar): applied again a moment later,
+	-- and the preset's outline mode is the one to give back
+	cv.graphicsOutlineMode, cv.outlineModeShowLootEffectWhenDisabled = "1", "0"
+	MOCK.Fire("CVAR_UPDATE", "graphicsOutlineMode", "1")
+	MOCK.Fire("CVAR_UPDATE", "outlineModeShowLootEffectWhenDisabled", "0")
+	check(#MOCK.timers == 1, "a preset should queue exactly one re-apply, got " .. #MOCK.timers)
+	runTimers(1)
+	check(cv.graphicsOutlineMode == "0" and cv.outlineModeShowLootEffectWhenDisabled == "1", "not applied after a preset")
+	check(s.sparkleOutline.graphicsOutlineMode == "1", "the preset's outline mode not kept")
+	cv.outlineModeShowLootEffectWhenDisabled = "0"
+	MOCK.Fire("GX_RESTARTED")
+	runTimers(1)
+	check(ns.SparklesActive(), "lost after a graphics restart")
+	-- off from chat: outline modes back, loot effect off, and it stays off after a preset
+	SlashCmdList.EVERLOOKDB("sparkles off")
+	check(s.questSparkles == false, "setting not off")
+	check(cv.graphicsOutlineMode == "1" and cv.RAIDgraphicsOutlineMode == "1" and cv.outlineModeShowLootEffectWhenDisabled == "0",
+		"not restored: " .. cv.graphicsOutlineMode .. cv.RAIDgraphicsOutlineMode .. cv.outlineModeShowLootEffectWhenDisabled)
+	check(s.sparkleOutline == nil, "restore values left behind")
+	cv.graphicsOutlineMode = "0"
+	MOCK.Fire("CVAR_UPDATE", "graphicsOutlineMode", "0")
+	runTimers(1)
+	check(cv.outlineModeShowLootEffectWhenDisabled == "0", "applied while off")
+	-- with no kept value the outline mode comes back as High
+	SlashCmdList.EVERLOOKDB("set sparkles on")
+	check(s.questSparkles == true and cv.outlineModeShowLootEffectWhenDisabled == "1", "on again")
+	s.sparkleOutline = nil
+	SlashCmdList.EVERLOOKDB("sparkles toggle")
+	check(s.questSparkles == false and cv.graphicsOutlineMode == "2", "outline not High when nothing was kept: " .. cv.graphicsOutlineMode)
+	-- a client without these CVars (or whose CVar API throws): nothing breaks
+	stub("C_CVar", { GetCVar = function() error("no such cvar") end, SetCVar = function() error("nope") end })
+	SlashCmdList.EVERLOOKDB("sparkles on")
+	check(ns.SparklesApply() == false and not ns.SparklesActive(), "a missing CVar counted as applied")
+	SlashCmdList.EVERLOOKDB("sparkles off")
+	unstubAll()
+	s.questSparkles = true
+	check(not hasText(s, "Creature-") and not hasText(s, "Player-"), "a GUID in the settings")
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)
