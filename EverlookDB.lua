@@ -60,7 +60,11 @@ end
 local function pack(...) return { n = select("#", ...), ... } end  -- WoW runs Lua 5.1: no table.pack
 local function safe(f, ...)
   local r = pack(pcall(f, ...))
-  if not r[1] then return nil end
+  if not r[1] then
+    local h = ns.health  -- the self-test counts calls that threw (Health.lua)
+    if h then h.errors = math.min((h.errors or 0) + 1, 1000000) end
+    return nil
+  end
   for i = 2, r.n do r[i] = ok(r[i]) end
   return unpack(r, 2, r.n)
 end
@@ -75,19 +79,27 @@ local function noName(text)
   return text
 end
 
--- "Creature-0-server-instance-zone-NPCID-spawn" -> "u", NPCID ; GameObject likewise -> "o", id
-local function parseGUID(guid)
+-- "Creature-0-server-instance-zone-NPCID-spawn": the type and the NPC id, nothing else. Any other shape (a game
+-- update that changes GUIDs) gives nil, so a wrong id is never saved; the self-test counts it (Health.lua).
+local GUID_FIELDS = 7
+local function guidTypeID(guid)
   guid = ok(guid)
   if type(guid) ~= "string" then return nil end
   local kind, _, _, _, _, id = strsplit("-", guid)
   id = tonumber(id)
-  if not id then return nil end
+  if not id or id <= 0 or select(2, guid:gsub("-", "")) ~= GUID_FIELDS - 1 then return nil end
+  return kind, id
+end
+
+-- -> "u", NPCID for creatures and vehicles, "o", id for game objects
+local function parseGUID(guid)
+  local kind, id = guidTypeID(guid)
   if kind == "Creature" or kind == "Vehicle" then return "u", id end
   if kind == "GameObject" then return "o", id end
   return nil
 end
 
-ns.ok, ns.safe, ns.parseGUID = ok, safe, parseGUID
+ns.ok, ns.safe, ns.parseGUID, ns.GuidTypeID = ok, safe, parseGUID, guidTypeID
 
 local function itemID(link)
   link = ok(link)
@@ -128,16 +140,113 @@ local function seenSet(limit)
 end
 ns.SeenSet = seenSet
 
--- Spawns (GUIDs) whose position was counted this session: each spawn counts once, however long you stand
--- next to it (the nameplate scan sees it every second) and whether you then loot it or not.
+-- Keys seen within the last `seconds`. sliding: every sighting starts the window again (a creature you stand next
+-- to stays one sighting); else the window runs from the first one. Holds about `limit` keys at most.
+local function recentSet(limit, seconds, sliding)
+  local at, n = {}, 0
+  local set = {}
+  -- true when k was seen within the window; notes this sighting either way
+  function set.seen(k)
+    local now = GetTime()
+    local t = at[k]
+    if t and now - t < seconds then
+      if sliding then at[k] = now end
+      return true
+    end
+    if not t then n = n + 1 end
+    at[k] = now
+    if n > limit then
+      n = 0
+      for key, v in pairs(at) do
+        if now - v >= seconds then at[key] = nil else n = n + 1 end
+      end
+      if n > limit then at, n = { [k] = now }, 1 end
+    end
+    return false
+  end
+  return set
+end
+ns.RecentSet = recentSet
+
+---------------------------------------------------------------------------------------------------
+-- GUID trust. In memory, a unit's full GUID is only an opaque "is this the same spawn?" key. It is never parsed
+-- past its type and ID, and never saved. Since build 71037 Blizzard scrambles the server, zone and spawn parts of
+-- NPC GUIDs. If the same unit ever gives a different GUID (two reads in a row, or a target or nameplate that hasn't
+-- changed), GUIDs can't tell spawns apart. Counting then falls back to NPC id + map cell + a time window, for the
+-- rest of the session and for later sessions on this build (the counts live in the saved health). When we can't
+-- tell two spawns apart, we count one.
+
+local trust = { stable = true, counts = { checked = 0, badFormat = 0, changed = 0 } }
+ns.GuidTrust = trust
+local byToken = {}  -- "target" / "nameplateN" -> { guid, id } while that token still points at the same unit
+
+local function countGUID(field)
+  local c = trust.counts
+  if (c[field] or 0) < 1000000 then c[field] = (c[field] or 0) + 1 end
+end
+
+-- Use these saved counts (the health of this build and addon version); GUIDs found unstable before stay distrusted.
+function ns.TrustCounts(counts)
+  trust.counts = counts
+  if (counts.changed or 0) > 0 then trust.stable = false end
+end
+
+local function guidChanged()
+  countGUID("changed")
+  trust.stable = false
+end
+
+-- A creature's GUID, read once more straight away and, for a tracked token, compared with its last read
+local function watchGUID(unit, guid, id)
+  countGUID("checked")
+  local again = ok(UnitGUID(unit))
+  if type(again) == "string" and again ~= guid then return guidChanged() end
+  if unit == "target" or unit:find("^nameplate") then
+    local last = byToken[unit]
+    if last and last.id == id and last.guid ~= guid then guidChanged() end
+    byToken[unit] = { guid = guid, id = id }
+  end
+end
+ns.ForgetToken = function(unit) if unit then byToken[unit] = nil end end
+
+-- Two GUIDs name the same unit: equal while GUIDs are stable, else the same type and id.
+function ns.SameUnit(a, b)
+  a, b = ok(a), ok(b)
+  if type(a) ~= "string" or type(b) ~= "string" then return false end
+  if trust.stable then return a == b end
+  local ka, ia = guidTypeID(a)
+  local kb, ib = guidTypeID(b)
+  return ka ~= nil and ka == kb and ia == ib
+end
+
+-- A map cell of `grid` units (of 0..1000) as text, "?" without a position
+local function cell(x, y, grid)
+  if not x or not y then return "?" end
+  return math.floor(x / grid) .. ":" .. math.floor(y / grid)
+end
+
+-- The first sighting of a spawn: by its GUID while GUIDs are stable, else by the fallback key within its window
+local function firstSight(byGUID, byFallback, guid, fallback)
+  if trust.stable then
+    if byGUID.has(guid) then return false end
+    byGUID.add(guid)
+    return true
+  end
+  return not byFallback.seen(fallback)
+end
+
+-- Spawns whose position was counted this session: each spawn counts once, however long you stand next to it (the
+-- nameplate scan sees it every second) and whether you then loot it or not. Without trusted GUIDs: once per NPC and
+-- grid cell while it is still seen, until it has been out of sight for 5 minutes.
 local spotCounted = seenSet(5000)
+local spotRecent = recentSet(5000, 300, true)
 
 -- add a position to rec.p[map] as a grid cell "x:y" -> times seen (each spawn once a session when guid is given)
-local function addSpot(rec, map, x, y, guid)
+local function addSpot(rec, map, x, y, guid, id)
   if not map then return end
   if guid then
-    if spotCounted.has(guid) then return end
-    spotCounted.add(guid)
+    local fallback = (id or 0) .. "@" .. map .. ":" .. cell(x, y, SPAWN_GRID)
+    if not firstSight(spotCounted, spotRecent, guid, fallback) then return end
   end
   rec.p = rec.p or {}
   local cells = rec.p[map]
@@ -190,6 +299,8 @@ ns.NormalizeSpots = normalizeSpots
 
 local scanned = {}  -- npc ids whose tooltip was read this session
 local levelCounted = seenSet(5000)  -- beast spawns (GUIDs) whose level was counted this session
+-- without trusted GUIDs: an NPC id at a level, near the same spot (a 5% cell), until out of sight for 5 minutes
+local levelRecent = recentSet(5000, 300, true)
 local recent = {}   -- name -> { id, level, at }: NPCs seen lately, to match "X dies, you gain N experience"
 local SKINNABLE = {}
 for _, g in ipairs({ "UNIT_SKINNABLE_LEATHER", "UNIT_SKINNABLE_HERB", "UNIT_SKINNABLE_ROCK", "UNIT_SKINNABLE_BOLTS" }) do
@@ -225,8 +336,14 @@ local function readUnit(unit, near, here)
   -- companions and other players' pets carry a name and an owner line that a player chose or is
   if UnitIsBattlePetCompanion and ok(UnitIsBattlePetCompanion(unit)) then return end
   if UnitIsOtherPlayersPet and ok(UnitIsOtherPlayersPet(unit)) then return end
-  local kind, id = parseGUID(UnitGUID(unit))
-  if kind ~= "u" then return end
+  local guid = ok(UnitGUID(unit))
+  local kind, id = parseGUID(guid)
+  if kind ~= "u" then
+    -- a creature GUID of a shape we don't know: record nothing, but count it for the self-test
+    if type(guid) == "string" and (guid:find("^Creature%-") or guid:find("^Vehicle%-")) then countGUID("badFormat") end
+    return
+  end
+  watchGUID(unit, guid, id)
   local rec = npcRecord(id)
   rec.name = ok(UnitName(unit)) or rec.name
   local lvl = ok(UnitLevel(unit))
@@ -258,10 +375,9 @@ local function readUnit(unit, near, here)
   rec.type = ok(UnitCreatureType(unit)) or rec.type          -- Beast, Humanoid, ... (client language)
   rec.family = ok(UnitCreatureFamily(unit)) or rec.family    -- Wolf, Spider, ...
   -- beasts: how many spawns were seen at each level (each spawn once a session), so a level spread shows
-  local guid = ok(UnitGUID(unit))
   if lvl and lvl > 0 and ok(UnitCreatureFamily(unit)) then
-    if guid and not levelCounted.has(guid) then
-      levelCounted.add(guid)
+    local fallback = id .. ":" .. lvl .. "@" .. tostring(zone) .. ":" .. cell(here[2], here[3], 50)
+    if firstSight(levelCounted, levelRecent, guid, fallback) then
       rec.lvl = rec.lvl or {}
       rec.lvl[lvl] = (rec.lvl[lvl] or 0) + 1
       changes = changes + 1
@@ -290,7 +406,7 @@ local function readUnit(unit, near, here)
   if near and guid then
     local map, x, y = here[1], here[2], here[3]
     if not x then map = instanceMap() or map end
-    addSpot(rec, map, x, y, guid)
+    addSpot(rec, map, x, y, guid, id)
   end
   return rec, id
 end
@@ -303,6 +419,12 @@ end
 
 local function scanNameplates()
   if paused then return end
+  -- the target, once a second: a creature you keep targeted must keep its GUID
+  if trust.stable then
+    local guid = ok(UnitGUID("target"))
+    local kind, id = parseGUID(guid)
+    if kind == "u" and not ok(UnitIsPlayer("target")) then watchGUID("target", guid, id) end
+  end
   local here  -- the player's position, read once a tick and only when there are plates
   for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
     local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
@@ -327,6 +449,9 @@ local GATHER_SPELLS = {
 local lastCast, lastCastAt = nil, 0
 local lastObjectName, lastObjectAt = nil, 0
 local looted = seenSet(2000)  -- "kind..guid" already counted this session (the latest few thousand)
+-- without trusted GUIDs: the same kind of loot from the same NPC or object near the same spot (a 2% cell) within
+-- 30 seconds is the same corpse or node opened again
+local lootedRecent = recentSet(2000, 30, false)
 local lootDone = false
 local moneyBefore, moneySources = 0, nil
 
@@ -353,11 +478,16 @@ local function readLoot()
   lootDone = true
   changes = changes + 1
 
-  -- per source guid: items it gave
+  -- per source: items it gave. A source is its GUID while GUIDs are stable, else its type and id (one corpse whose
+  -- GUID reads differently per slot is still one corpse)
   local sources, order = {}, {}
+  local fished = {}  -- every slot's items, for fishing (which has no mob or object)
   local function src(guid)
-    local s = sources[guid]
-    if not s then s = { items = {} }; sources[guid] = s; order[#order + 1] = guid end
+    local sk, id = parseGUID(guid)
+    if not sk then return nil end
+    local key = trust.stable and guid or (sk .. ":" .. id)
+    local s = sources[key]
+    if not s then s = { items = {}, guid = guid, sk = sk, id = id }; sources[key] = s; order[#order + 1] = key end
     return s
   end
   for slot = 1, slots do
@@ -365,11 +495,10 @@ local function readLoot()
     local id = itemID(link)
     local info = { safe(GetLootSourceInfo, slot) }
     for j = 1, #info, 2 do
-      local guid, qty = info[j], info[j + 1]
-      if guid then
-        local s = src(guid)
-        if id then s.items[id] = (s.items[id] or 0) + (qty or 1) end
-      end
+      local guid, qty = ok(info[j]), info[j + 1]
+      if guid and id then fished[id] = (fished[id] or 0) + (qty or 1) end
+      local s = guid and src(guid)
+      if s and id then s.items[id] = (s.items[id] or 0) + (qty or 1) end
     end
   end
 
@@ -380,12 +509,10 @@ local function readLoot()
     local map = where()
     local rec = lootRecord("f:" .. (map or 0))
     rec.n = rec.n + 1
-    for _, s in pairs(sources) do
-      for id, qty in pairs(s.items) do
-        local it = rec.i[id] or { 0, 0 }
-        it[1], it[2] = it[1] + 1, it[2] + qty
-        rec.i[id] = it
-      end
+    for id, qty in pairs(fished) do
+      local it = rec.i[id] or { 0, 0 }
+      it[1], it[2] = it[1] + 1, it[2] + qty
+      rec.i[id] = it
     end
     return
   end
@@ -393,17 +520,17 @@ local function readLoot()
   local map, x, y = where()
   local inst = instanceMap()
   moneySources = {}
-  for _, guid in ipairs(order) do
-    local sk, id = parseGUID(guid)
-    if sk then
+  for _, skey in ipairs(order) do
+    local s = sources[skey]
+    local sk, id, guid = s.sk, s.id, s.guid
+    do
       local kind = lootKind(sk)
-      local seenKey = kind .. guid
-      if not looted.has(seenKey) then
-        looted.add(seenKey)
+      local fallback = kind .. ":" .. id .. "@" .. tostring(map or inst) .. ":" .. cell(x, y, 20)
+      if firstSight(looted, lootedRecent, kind .. guid, fallback) then
         local key = kind .. ":" .. id
         local rec = lootRecord(key)
         rec.n = rec.n + 1
-        for item, qty in pairs(sources[guid].items) do
+        for item, qty in pairs(s.items) do
           local it = rec.i[item] or { 0, 0 }   -- { times it dropped, total quantity }
           it[1], it[2] = it[1] + 1, it[2] + qty
           rec.i[item] = it
@@ -411,7 +538,7 @@ local function readLoot()
         moneySources[#moneySources + 1] = rec
         -- where it was: corpses mark NPC spawns, objects mark node spawns
         if sk == "u" then
-          addSpot(npcRecord(id), x and map or inst or map, x, y, guid)  -- not again when it was counted alive
+          addSpot(npcRecord(id), x and map or inst or map, x, y, guid, id)  -- not again when it was counted alive
         else
           local obj = db.obj[id]
           if not obj then obj = {}; db.obj[id] = obj end
@@ -885,6 +1012,11 @@ local function init()
   local version, build = GetBuildInfo()
   db.builds = db.builds or {}
   db.builds[version .. "." .. build] = true
+  -- the build and addon version this file is written by now: the site tags each upload with them
+  db.build = version .. "." .. build
+  local meta = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+  db.addon = meta and safe(meta, ADDON, "Version") or nil
+  if ns.HealthCheck then ns.health = ns.HealthCheck(db, db.addon); ns.TrustCounts(ns.health.guid) end
   db.since = db.since or time()
   db.npc, db.loot, db.obj = db.npc or {}, db.loot or {}, db.obj or {}
   db.vendor, db.quest = db.vendor or {}, db.quest or {}
@@ -958,7 +1090,9 @@ local handlers = {
     C_Timer.NewTicker(1, scanNameplates)
   end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
-  PLAYER_TARGET_CHANGED = function() readUnit("target", isNear("target")) end,
+  PLAYER_TARGET_CHANGED = function() ns.ForgetToken("target"); readUnit("target", isNear("target")) end,
+  NAME_PLATE_UNIT_ADDED = ns.ForgetToken,
+  NAME_PLATE_UNIT_REMOVED = ns.ForgetToken,
   UNIT_SPELLCAST_SUCCEEDED = function(unit, _, spellID)
     if unit ~= "player" then return end
     lastCast, lastCastAt = spellName(spellID), GetTime()

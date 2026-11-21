@@ -75,10 +75,7 @@ end
 
 -- "Creature-0-server-instance-zone-NPCID-spawn" or "Pet-0-...-NPCID-..." -> kind, NPCID
 local function guidId(guid)
-  guid = str(guid)
-  if not guid then return nil end
-  local kind, _, _, _, _, id = strsplit("-", guid)
-  return kind, tonumber(id)
+  return ns.GuidTypeID(str(guid))
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -225,7 +222,7 @@ end
 local function noteTame(w)
   watching = nil
   if ns.IsPaused() or not ns.Ready() then return end
-  recordedPets[w.guid] = true
+  if w.key then recordedPets[w.key] = true end
   local p = w.best or w.last
   if not p then return end
   local rec = beastRecord(w.npc)
@@ -262,7 +259,7 @@ end
 local function readWatched(step)
   local w = watching
   if not w then return end
-  if str(call(UnitGUID, "pet")) ~= w.guid then return noteTame(w) end  -- dismissed or died: note what was seen
+  if not ns.SameUnit(str(call(UnitGUID, "pet")), w.guid) then return noteTame(w) end  -- dismissed or died: note what was seen
   local p = readPet()
   w.last = p
   if not w.best or p.n >= w.best.n then w.best = p end
@@ -284,7 +281,9 @@ local function petChanged()
   local t = pendingTame
   if not t or GetTime() - t.at > 60 then return end
   local guid = str(call(UnitGUID, "pet"))
-  if not guid or recordedPets[guid] then return end
+  -- a pet already noted: by its GUID while GUIDs are stable (else the pending tame above is the only guard)
+  local key = ns.GuidTrust.stable and guid or nil
+  if not guid or (key and recordedPets[key]) then return end
   -- the new pet's GUID carries the creature id it was tamed from: it must be the beast we cast on. Without one,
   -- only a pet that arrives as the channel ends counts, so calling an old pet after a failed tame never does.
   local kind, id = guidId(guid)
@@ -294,7 +293,7 @@ local function petChanged()
     return
   end
   pendingTame = nil
-  watching = { guid = guid, npc = t.npc, lvl = t.lvl }
+  watching = { guid = guid, key = key, npc = t.npc, lvl = t.lvl }
   local w = watching
   C_Timer.After(READS[1], function() if watching == w then readWatched(1) end end)
 end
@@ -338,7 +337,7 @@ end
 
 local function unitFor(guid)
   for _, u in ipairs({ "target", "mouseover" }) do
-    if str(call(UnitGUID, u)) == guid then return u end
+    if ns.SameUnit(str(call(UnitGUID, u)), guid) then return u end
   end
 end
 

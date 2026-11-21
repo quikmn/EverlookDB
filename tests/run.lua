@@ -399,6 +399,7 @@ step("fresh tame: the new pet's spellbook, auras, speed, level, family, training
 	hunterWorld()
 	if ns.IsPaused() then ns.SetPaused(false) end
 	H.guids.target = "Creature-0-1-2-3-3825-0000AB12CD"
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
 	H.levels.target, H.levels.pet = 12, 12
 	H.families.pet = { "Cat", 2 }
 	H.petSpells = {}   -- the spellbook arrives late
@@ -432,6 +433,7 @@ end)
 step("a failed tame, then calling an old pet, notes nothing", function()
 	hunterWorld()
 	H.guids.target = "Creature-0-1-2-3-1131-0000AB12CE"
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
 	H.levels.target = 9
 	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-2", 1515)
 	MOCK.Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "cast-2", 1515)
@@ -446,6 +448,7 @@ end)
 step("Beast Lore: the lines it adds, as the game gives them, spell ids, level and a count of reads", function()
 	hunterWorld()
 	H.guids.target = "Creature-0-1-2-3-1131-0000AB12CF"
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
 	H.levels.target = 11
 	H.lines = LORE_BEFORE
 	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "Mangy Wolf", "cast-3", 1462)
@@ -717,6 +720,210 @@ step("login drops saved titles that name an owner", function()
 	MOCK.Fire("PLAYER_LOGIN")
 	check(EverlookDBData.npc[248463].title == nil, "owner title kept")
 	check(EverlookDBData.npc[1481].title == "Captain of the Maiden's Virtue", "a real title dropped")
+end)
+
+---------------------------------------------------------------------------------------------------
+-- GUID trust: GUIDs are only a "same spawn?" key in memory, and only while they are stable
+
+local function resetTrust()
+	ns.GuidTrust.stable = true
+	ns.TrustCounts({ checked = 0, badFormat = 0, changed = 0 })
+end
+
+-- creatures of `npc` on nameplates next to the player; scramble: every UnitGUID call gives a new spawn part
+local function plateWorld(npc, plates, scramble)
+	local n = 0
+	local shown = {}
+	for i = 1, plates do shown[i] = { namePlateUnitToken = "nameplate" .. i } end
+	local world = { shown = shown, npc = npc }
+	local function isPlate(u) local i = tonumber(tostring(u):match("^nameplate(%d+)$")); return i and shown[i] ~= nil end
+	stub("UnitGUID", function(u)
+		if not isPlate(u) then return nil end
+		if scramble then n = n + 1; return ("Creature-0-%d-0-%d-%d-%010X"):format(n, n * 7, world.npc, n) end
+		return ("Creature-0-1-2-3-%d-%010X"):format(world.npc, tonumber(u:match("%d+")))
+	end)
+	stub("UnitExists", isPlate)
+	stub("UnitIsPlayer", function() return false end)
+	stub("UnitPlayerControlled", function() return false end)
+	stub("UnitName", function(u) return isPlate(u) and "Kobold Vermin" end)
+	stub("UnitLevel", function() return 2 end)
+	stub("UnitHealthMax", function() return 50 end)
+	stub("UnitClassification", function() return "normal" end)
+	stub("UnitCreatureType", function() return "Humanoid" end)
+	stub("UnitCreatureFamily", function() return nil end)
+	stub("UnitReaction", function() return 2 end)
+	stub("CheckInteractDistance", function() return true end)
+	stub("C_Map", {
+		GetBestMapForUnit = function() return 1429 end,
+		GetPlayerMapPosition = function() return { GetXY = function() return 0.4, 0.6 end } end,
+	})
+	stub("C_NamePlate", { GetNamePlates = function() local out = {}; for _, p in pairs(shown) do out[#out + 1] = p end; return out end })
+	return world
+end
+
+local function tick(n) for _ = 1, n or 1 do MOCK.time = MOCK.time + 1; MOCK.RunTimers() end end
+
+step("guid trust: steady GUIDs stay trusted; a GUID that changes on the next read is not", function()
+	resetTrust()
+	plateWorld(7, 2, false)
+	tick(5)
+	check(ns.GuidTrust.stable and ns.GuidTrust.counts.checked > 0 and ns.GuidTrust.counts.changed == 0, "steady GUIDs distrusted")
+	unstubAll()
+	plateWorld(7, 1, true)
+	tick(1)
+	check(not ns.GuidTrust.stable and ns.GuidTrust.counts.changed >= 1, "a changing GUID was trusted")
+	unstubAll()
+	-- a target that keeps its token (no target change) but shows a new GUID for the same NPC
+	resetTrust()
+	local g = "Creature-0-1-2-3-99-00000000A1"
+	stub("UnitGUID", function(u) if u == "target" then return g end end)
+	stub("UnitIsPlayer", function() return false end)
+	tick(1)
+	g = "Creature-0-9-2-8-99-00000000B7"
+	tick(1)
+	check(not ns.GuidTrust.stable, "the target's GUID changed and was still trusted")
+	-- a real target change is not a GUID change
+	resetTrust()
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	g = "Creature-0-1-2-3-99-00000000C3"
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	tick(2)
+	check(ns.GuidTrust.stable, "a new target was taken for a changed GUID")
+	unstubAll()
+end)
+
+step("stable GUIDs: two spawns of one NPC side by side count as two, each once", function()
+	resetTrust()
+	plateWorld(9, 2, false)
+	tick(20)
+	local cells = EverlookDBData.npc[9].p[1429]
+	check(ns.GuidTrust.stable and cells["400:600"] == 2, "two spawns: " .. tostring(cells["400:600"]))
+	unstubAll()
+end)
+
+step("unstable GUIDs: a creature you stand next to counts once by NPC and spot, again after 5 minutes out of sight", function()
+	resetTrust()
+	EverlookDBData.npc[8] = nil
+	local w = plateWorld(8, 1, true)
+	tick(30)
+	local cells = EverlookDBData.npc[8].p[1429]
+	check(not ns.GuidTrust.stable, "not distrusted")
+	check(cells["400:600"] == 1, "30 s next to one creature: " .. tostring(cells["400:600"]))
+	-- two plates of the same NPC on the same spot: we can't tell them apart, so one
+	w.shown[2] = { namePlateUnitToken = "nameplate2" }
+	tick(10)
+	check(cells["400:600"] == 1, "same NPC, same spot, counted again: " .. cells["400:600"])
+	-- out of sight for longer than 5 minutes: a new sighting
+	w.shown[1], w.shown[2] = nil, nil
+	tick(301)
+	w.shown[1] = { namePlateUnitToken = "nameplate1" }
+	tick(2)
+	check(cells["400:600"] == 2, "back after 5 minutes: " .. cells["400:600"])
+	unstubAll()
+end)
+
+step("unstable GUIDs: a corpse whose GUID differs per loot slot counts once; opened again soon, not again", function()
+	resetTrust()
+	ns.GuidTrust.stable = false
+	stub("C_Map", {
+		GetBestMapForUnit = function() return 1429 end,
+		GetPlayerMapPosition = function() return { GetXY = function() return 0.4, 0.6 end } end,
+	})
+	local L = EverlookDBData.loot
+	L["u:476"] = nil
+	openLoot({ ["Creature-0-11-0-21-476-00000000F1"] = { 2589 }, ["Creature-0-12-0-22-476-00000000F2"] = { 2770 },
+		["Creature-0-13-0-23-476-00000000F3"] = { 818 } })
+	check(L["u:476"] and L["u:476"].n == 1, "one corpse counted " .. tostring(L["u:476"] and L["u:476"].n) .. " times")
+	check(L["u:476"].i[2589][1] == 1 and L["u:476"].i[2770][1] == 1 and L["u:476"].i[818][1] == 1, "items lost")
+	MOCK.time = MOCK.time + 5
+	openLoot({ ["Creature-0-14-0-24-476-00000000F4"] = { 2589 } })
+	check(L["u:476"].n == 1 and L["u:476"].i[2589][1] == 1, "the same corpse opened again was counted")
+	MOCK.time = MOCK.time + 31
+	openLoot({ ["Creature-0-15-0-25-476-00000000F5"] = { 2589 } })
+	check(L["u:476"].n == 2 and L["u:476"].i[2589][1] == 2, "the next corpse half a minute later: " .. L["u:476"].n)
+	unstubAll()
+	-- stable GUIDs: two corpses of one NPC in one window are two
+	resetTrust()
+	L["u:477"] = nil
+	openLoot({ ["Creature-0-1-2-3-477-00000000E1"] = { 2589 }, ["Creature-0-1-2-3-477-00000000E2"] = { 2589 } })
+	check(L["u:477"].n == 2 and L["u:477"].i[2589][1] == 2, "stable: two corpses " .. L["u:477"].n)
+	unstubAll()
+end)
+
+step("unstable GUIDs: a beast's level counts once per spot, not once per new GUID", function()
+	resetTrust()
+	ns.GuidTrust.stable = false
+	EverlookDBData.npc[1132] = nil
+	local n = 0
+	stub("UnitGUID", function(u) if u == "target" then n = n + 1; return ("Creature-0-%d-0-0-1132-%010X"):format(n, n) end end)
+	stub("UnitExists", function(u) return u == "target" end)
+	stub("UnitIsPlayer", function() return false end)
+	stub("UnitPlayerControlled", function() return false end)
+	stub("UnitName", function(u) if u == "target" then return "Timber Wolf" end end)
+	stub("UnitLevel", function() return 10 end)
+	stub("UnitCreatureFamily", function() return "Wolf", 1 end)
+	stub("UnitClassification", function() return "normal" end)
+	stub("UnitCreatureType", function() return "Beast" end)
+	stub("UnitReaction", function() return 2 end)
+	stub("UnitHealthMax", function() return 100 end)
+	stub("CheckInteractDistance", function() return false end)
+	for _ = 1, 3 do MOCK.Fire("PLAYER_TARGET_CHANGED") end
+	check(EverlookDBData.npc[1132].lvl[10] == 1, "level counted " .. tostring(EverlookDBData.npc[1132].lvl[10]) .. " times")
+	unstubAll()
+end)
+
+step("a creature GUID of a shape we don't know records nothing and is counted for the self-test", function()
+	resetTrust()
+	local before = ns.GuidTrust.counts.badFormat
+	stub("UnitGUID", function(u) if u == "target" then return "Creature-0-1-2-3333-00AB" end end)
+	stub("UnitExists", function(u) return u == "target" end)
+	stub("UnitIsPlayer", function() return false end)
+	stub("UnitPlayerControlled", function() return false end)
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	check(EverlookDBData.npc[3333] == nil and EverlookDBData.npc[2] == nil, "a wrong id was saved")
+	check(ns.GuidTrust.counts.badFormat == before + 1, "not counted")
+	check(ns.parseGUID("Creature-0-1-2-3-6-0000AA0001") == "u" and ns.parseGUID("Creature-0-1-2-3-6") == nil, "parse")
+	unstubAll()
+end)
+
+step("health: saved with the data as words and counts, never a GUID, a name or the realm", function()
+	resetTrust()
+	local cached = false
+	local function f() end
+	stub("GetItemInfo", function(id) if id == 2589 and cached then return "Linen Cloth" end end)
+	-- the core APIs the mock doesn't have
+	for _, name in ipairs({ "GetLootSourceInfo", "GetLootSlotLink", "GetNumLootItems", "GetMerchantItemLink", "GetMerchantNumItems", "GetQuestID" }) do
+		if type(_G[name]) ~= "function" then stub(name, f) end
+	end
+	stub("C_QuestLog", { GetQuestObjectives = f })
+	MOCK.Fire("PLAYER_LOGIN")
+	local h = EverlookDBData.health
+	check(h and h.build == "1.16.1.12345" and h.addon == "0.1.0-test", "build / addon: " .. tostring(h and h.build))
+	check(EverlookDBData.build == "1.16.1.12345" and EverlookDBData.addon == "0.1.0-test", "data not tagged")
+	check(h.realm == "ok" and h.item == "slow" and type(h.errors) == "number", "fields")
+	check(h.missing == nil, "missing: " .. table.concat(h.missing or {}, ","))
+	cached = true
+	runTimers(2)
+	check(h.item == "ok", "item info that loaded late: " .. tostring(h.item))
+	check(h.guid == ns.GuidTrust.counts, "GUID counts not saved")
+	check(not hasText(h, "Mock Realm") and not hasText(h, "Tester"), "a realm or name in the health")
+	check(not hasText(EverlookDBData, "Creature-") and not hasText(EverlookDBData, "GameObject-")
+		and not hasText(EverlookDBData, "Pet-0") and not hasText(EverlookDBData, "Player-"), "a GUID in the data file")
+	-- the realm API answering "" (Forever since 71037), and a missing core API
+	stub("GetRealmName", function() return "" end)
+	_G.GetLootSourceInfo = nil
+	MOCK.Fire("PLAYER_LOGIN")
+	check(h.realm == "empty" and h.missing and h.missing[1] == "GetLootSourceInfo", "realm / missing: " .. tostring(h.realm))
+	-- GUIDs found unstable stay distrusted on the next login with the same build; a new build starts again
+	h.guid.changed = 2
+	MOCK.Fire("PLAYER_LOGIN")
+	check(not ns.GuidTrust.stable, "unstable GUIDs trusted again after a reload")
+	stub("GetBuildInfo", function() return "1.16.2", "12399" end)
+	MOCK.Fire("PLAYER_LOGIN")
+	check(EverlookDBData.health.build == "1.16.2.12399" and EverlookDBData.health.guid.changed == 0, "counts carried into a new build")
+	check(ns.GuidTrust.counts == EverlookDBData.health.guid, "the new counts are not the ones counted")
+	unstubAll()
+	resetTrust()
 end)
 
 step("no Lua errors reported", function()
