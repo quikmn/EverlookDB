@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.6.0 (2026-11-21)
 
 - Quests: the reward window's currencies (such as Merchant's Favor) are noted next to its items, and reward items that are still loading are no longer missed. For a few seconds after you hand a quest in, the currencies and items you actually receive are counted for that quest, so bonus rewards (a Performance Bonus on a Sealed Crate) show how often each amount comes.
 - Loot: a corpse you loot a few seconds after skinning or pick pocketing another one is no longer counted as skinned or pick-pocketed (a pick-pocketed mob's own corpse loot was lost that way).
