@@ -3,6 +3,13 @@
 ## Unreleased
 
 - Quests: the reward window's currencies (such as Merchant's Favor) are noted next to its items, and reward items that are still loading are no longer missed. For a few seconds after you hand a quest in, the currencies and items you actually receive are counted for that quest, so bonus rewards (a Performance Bonus on a Sealed Crate) show how often each amount comes.
+- Loot: a corpse you loot a few seconds after skinning or pick pocketing another one is no longer counted as skinned or pick-pocketed (a pick-pocketed mob's own corpse loot was lost that way).
+- Loot: a chest or node whose name the game hides no longer takes the name of the last thing you hovered (a strongbox saved as "Chair"), and one name is never given to two objects.
+- Vendors: prices in a currency (such as Merchant's Favor) are saved with the currency's id, so the site can show them; the ones saved by name are fixed the next time you log in.
+- Quests: a hand-in window (bring 10 Wool Cloth) notes the quest's name too, and an objective whose item is still loading is read again a moment later instead of being saved empty.
+- Quests: an item you buy from a merchant right after a hand-in is no longer counted as the quest's reward.
+- Privacy: NPC titles that name an owner ("Someone's Guardian"), saved by versions before 0.2.0, are removed from your data file.
+- The window says "none yet" for hunter beasts instead of a row of zeros.
 
 ## v0.5.0 (2026-11-20)
 - Settings window: switches, buttons and sliders use a softer shade of the accent colour, an on switch has a dark knob so it stands out, and boxes have cleaner rounded edges.
