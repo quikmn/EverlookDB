@@ -2,34 +2,28 @@
 
 ## Unreleased
 
-- Quest item sparkles: the glitter on quest objects you can loot stays on, even after a graphics preset or a graphics restart turns it off. The game only shows it with the unit outline off, so the addon turns that off too. It's on by default; untick it under Options (or /edb sparkles off) and your outline mode comes back (restart the game if the glitter stays).
+- Quest item sparkles: the glitter on quest objects you can loot stays on, even after a graphics preset turns it off. On by default; untick it under Options or type /edb sparkles off.
 
 ## v0.6.1 (2026-11-21)
 
-- Safer counting after the latest WoW Forever update. Since that update, the game scrambles part of the ID it gives each creature. If a creature's ID ever changes while you look at it, the addon stops relying on those IDs for the rest of the session. It then counts by NPC, spot and time instead, so one creature, corpse or node is never counted twice. When it can't tell two creatures apart, it counts one.
-- A creature ID in a shape the addon doesn't know is skipped instead of being saved with the wrong NPC.
-- A small health check runs when you log in. It notes your game build, the addon version, whether the game's realm, ID and item info work, and whether any game functions are missing or failing. It saves only yes/no answers and counts, never a name, a realm or an ID. The site uses it to hold data from a broken game update back until it has been checked.
+- Safer counting after the latest WoW Forever update: a creature, corpse or node is never counted twice.
+- A small health check at login notes whether the game's info works, as yes/no answers only. It never saves a name or realm.
 
 ## v0.6.0 (2026-11-21)
 
-- Quests: the reward window's currencies (such as Merchant's Favor) are noted next to its items, and reward items that are still loading are no longer missed. For a few seconds after you hand a quest in, the currencies and items you actually receive are counted for that quest, so bonus rewards (a Performance Bonus on a Sealed Crate) show how often each amount comes.
-- Loot: a corpse you loot a few seconds after skinning or pick pocketing another one is no longer counted as skinned or pick-pocketed (a pick-pocketed mob's own corpse loot was lost that way).
-- Loot: a chest or node whose name the game hides no longer takes the name of the last thing you hovered (a strongbox saved as "Chair"), and one name is never given to two objects.
-- Vendors: prices in a currency (such as Merchant's Favor) are saved with the currency's id, so the site can show them; the ones saved by name are fixed the next time you log in.
-- Quests: a hand-in window (bring 10 Wool Cloth) notes the quest's name too, and an objective whose item is still loading is read again a moment later instead of being saved empty.
-- Quests: an item you buy from a merchant right after a hand-in is no longer counted as the quest's reward.
-- Privacy: NPC titles that name an owner ("Someone's Guardian"), saved by versions before 0.2.0, are removed from your data file.
-- The window says "none yet" for hunter beasts instead of a row of zeros.
+- Quests: currency rewards such as Merchant's Favor are noted, and bonus rewards show how often each amount comes.
+- Loot: fixes for skinning and pickpocketing counts, and chests or nodes no longer take the wrong name.
+- Vendors: prices in currencies such as Merchant's Favor now show on the site.
+- Quests: hand-ins note the quest's name, and a merchant purchase right after a hand-in is no longer counted as a reward.
+- Privacy: NPC titles that name an owner, saved by versions before 0.2.0, are removed from your data file.
 
 ## v0.5.0 (2026-11-20)
-- Settings window: switches, buttons and sliders use a softer shade of the accent colour, an on switch has a dark knob so it stands out, and boxes have cleaner rounded edges.
 
-- NPC spawn spots: a creature you stand next to now counts once per play session, not once every second you stay near it, so the site's spawn maps show where creatures really stand instead of where you waited longest. Spots counted the old way in your data file are set to "seen here" once, the next time you log in.
-- Lighter while you play: your position is read once a second for all nameplates together, not once per nameplate.
-- Vendors: a vendor's list is read once when you open it, and a second time only when some items were still loading.
-- Quests: handing in a quest no longer runs into an error when the game hides the quest's XP or money from addons; the hand-in is still counted.
-- Long play sessions: the list of corpses and nodes already looted no longer grows all session; it keeps the latest few thousand.
-- In the AddOns list it is now "EverlookDB Collector: loot, NPCs, quests", so it isn't mixed up with the EverlookDB Tooltip Collector.
+- Spawn maps on the site are more accurate: standing next to a creature counts once, not every second.
+- Lighter while you play, and vendor lists are read only once.
+- Quest hand-ins no longer cause an error when the game hides their XP or money.
+- Softer colours and cleaner edges in the settings window.
+- Now listed as "EverlookDB Collector: loot, NPCs, quests" in the AddOns list.
 
 ## v0.4.1 (2026-11-18)
 

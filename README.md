@@ -10,12 +10,13 @@ A World of Warcraft: Forever addon that notes what you see while you play, so Ev
 - **Services and trainers:** flight masters, bankers, auctioneers, stable masters, innkeepers and trainers, and what each trainer teaches, for how much and from which level.
 - **Vendors:** what they sell, the price, the stack size and whether stock is limited.
 - **Quests:** who starts and ends each quest and where, the lowest level it was offered at, its objectives, required items and rewards (items, choices and currencies such as Merchant's Favor). For a few seconds after you hand a quest in, what you actually received: the currency amounts (so a bonus shows how often it comes) and the items the game's "You receive item" line names.
-- **Hunters, when you tame a beast:** which beast it was (its NPC id) and its level, and what the new pet shows in its first 30 seconds: the spell ids in its spellbook and which are passive, its permanent auras (Faster or Slower Attack), its attack speed, level, family, training points, and the game's words for what it eats.
-- **Hunters, when you cast Beast Lore:** the lines Beast Lore adds to the beast's tooltip, exactly as the game shows them (abilities, diet, tameable and the like), the ability lines turned into spell ids, the beast (its NPC id) and its level, and how many times you read it.
-- With every file: the game's language, the game versions you played on, when the addon started recording, and when you last opened each vendor and trainer. Tames and Beast Lore reads are counted per game version and calendar week (for example `2026-W47`), never by day or time of day.
+- **Hunters, when you tame a beast:** which beast it was and its level, and what the new pet knows in its first 30 seconds: its abilities, Faster or Slower Attack, attack speed, level, family, training points and diet.
+- **Hunters, when you cast Beast Lore:** the lines Beast Lore adds to the beast's tooltip (abilities, diet, tameable and the like), the beast and its level.
+- With every file: the game's language, the game versions you played on, when the addon started recording, and when you last opened each vendor and trainer. Tames and Beast Lore reads are counted per game version and week, never by day or time of day.
 
 ## Quest item sparkles
- Forever's graphics presets turn off the glitter on quest objects you can loot. The Collector keeps it on: at login and after any graphics change it sets `outlineModeShowLootEffectWhenDisabled` to 1 and the outline mode (`graphicsOutlineMode`, and the raid one) to off, since the game only shows the glitter without unit outlines. It's on by default. Untick **Show quest item sparkles** under Options, or `/edb sparkles off`, and it gives your outline mode back (High if it never saw another one); restart the game if the glitter stays. Written from the game's own settings, inspired by Forever Loot Sparkles.
+
+Forever's graphics presets turn off the glitter on quest objects you can loot. The Collector keeps it on (the game only shows it with the unit outline off, so it turns that off too). It's on by default. Untick **Show quest item sparkles** under Options, or type `/edb sparkles off`, and your outline mode comes back; restart the game if the glitter stays.
 
 ## What it never records
 
