@@ -1,0 +1,8 @@
+{
+  "projectId": 1804872,
+  "name": "EverlookDB Collector",
+  "slug": "everlookdb-collector",
+  "releaseType": "release",
+  "relations": [],
+  "syncOnRelease": false
+}
