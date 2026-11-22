@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.6.2 (2026-11-22)
 
 - Quest item sparkles: the glitter on quest objects you can loot stays on, even after a graphics preset turns it off. On by default; untick it under Options or type /edb sparkles off.
 
