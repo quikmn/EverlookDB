@@ -131,6 +131,26 @@ step("loot: quantities the game hides count as one; a source it hides is not gue
 	local l = EverlookDBData.loot["u:4115"]
 	check(l and l.n == 1 and l.i[2589][2] == 1, "hidden quantity")
 	unstubAll()
+	-- a source the game hides: the window is left out and said
+	local h = freshHealth()
+	lootWorld({ { guid = "Creature-0-1-2-3-4116-0000AD0009", id = 2589 } })
+	stub("GetLootSourceInfo", function() return MOCK.Secret("Creature-0-1-2-3-4116-0000AD0009"), 1 end)
+	MOCK.Fire("LOOT_READY"); MOCK.Fire("LOOT_CLOSED")
+	check(EverlookDBData.loot["u:4116"] == nil and h.notes and h.notes.lootUnread == 1, "a hidden source")
+	unstubAll()
+	-- a clam or lockbox opened from the bags (its source is an item), or loot the game names no source for: not
+	-- ours to count, and nothing to report or wait for
+	MOCK.RunTimers(); MOCK.RunTimers()
+	h = freshHealth()
+	lootWorld({ { guid = "Item-1-0-4000000ABCDEF123", id = 5498 }, { guid = "Item-1-0-4000000ABCDEF123", id = nil } })
+	MOCK.Fire("LOOT_READY"); MOCK.Fire("LOOT_OPENED"); MOCK.Fire("LOOT_CLOSED")
+	lootWorld({ { id = 5498 } })
+	stub("GetLootSourceInfo", function() return end)
+	MOCK.time = MOCK.time + 5
+	MOCK.Fire("LOOT_READY"); MOCK.Fire("LOOT_OPENED"); MOCK.Fire("LOOT_CLOSED")
+	check(h.notes == nil and #MOCK.timers == 0, "opening a clam was reported as an unreadable loot window")
+	unstubAll()
+	freshHealth()
 end)
 
 step("loading screens: a merchant window or loot window left open by one doesn't stay open for the addon", function()

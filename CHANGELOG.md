@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Opening a clam, lockbox or other container from your bags is no longer reported as a loot window that couldn't be read.
+
 ## v0.8.0 (2026-11-24)
 
 - `/edb status` now shows what was recorded lately in each zone or dungeon (NPCs, loot, quests, vendors), where your NPCs are known to be, and any problems in plain words. Check it right after a dungeon run. The window shows the same.

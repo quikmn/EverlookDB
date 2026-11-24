@@ -675,17 +675,22 @@ local function scanLoot()
     -- coins and currencies have no item link; an item slot without one is an item that hasn't loaded yet
     local isItem = id ~= nil or (GetLootSlotType ~= nil and num(safe(GetLootSlotType, slot)) == LOOT_ITEM)
     local info = pack(safe(GetLootSourceInfo, slot))
-    local credited = false
+    -- ours: it comes from a creature or object (what we count); hidden: the game won't say what it comes from.
+    -- Anything else (a clam or lockbox opened from your bags) is not ours to count and no reason to wait.
+    local credited, ours, hidden = false, false, false
     for j = 1, info.n, 2 do
       local guid, qty = info[j], num(info[j + 1]) or 1
       if type(guid) == "string" then
         if id and fishing then fished[id] = (fished[id] or 0) + qty; credited = true end
         local s = src(guid)
         if s then
+          ours = true
           if id then s.items[id] = (s.items[id] or 0) + qty; credited = true
           elseif isItem then s.bad = true end
           sig[#sig + 1] = s.sk .. s.id .. ":" .. (id or 0)
         end
+      else
+        hidden = true
       end
     end
     if fishing and id and not credited then
@@ -695,7 +700,7 @@ local function scanLoot()
       fished[id] = (fished[id] or 0) + (num(qty) or 1)
       credited = true
     end
-    if isItem and not credited then bad = bad + 1; sig[#sig + 1] = "?" .. (id or 0) end
+    if isItem and not credited and (ours or hidden or fishing) then bad = bad + 1; sig[#sig + 1] = "?" .. (id or 0) end
   end
   return { sources = sources, order = order, fished = fished, fishing = fishing, bad = bad, sig = table.concat(sig, ",") }
 end
@@ -772,7 +777,8 @@ local function countLoot(read)
       end
     end
   end
-  if unread then G.count("lootUnread"); tally("unread") end
+  -- (no source at all could be told: the game hid them all)
+  if unread or (read.bad > 0 and #order == 0) then G.count("lootUnread"); tally("unread") end
   -- a skinning, gathering or pick pocket cast names one loot window only: the next corpse you loot within
   -- a few seconds is a plain corpse again
   lastCast = nil
