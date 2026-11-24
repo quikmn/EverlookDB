@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.8.1 (2026-11-24)
 
 - Opening a clam, lockbox or other container from your bags is no longer reported as a loot window that couldn't be read.
 
