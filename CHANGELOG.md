@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.8.2 (2026-11-24)
 
 - `/edb status` lists as problems only what needs your attention. Things that were merely left out, like a loot window the game was too slow to show, are plain notes.
 - The window opens quickly with a big data file.
