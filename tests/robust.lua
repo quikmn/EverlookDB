@@ -26,9 +26,13 @@ step("errors: a handler that throws is counted by its event, with a sample that 
 	check(h.log and #h.log == 1 and h.log[1]:find("event:QUEST_TURNED_IN | ", 1, true), "no sample")
 	check(not hasText(h, "Creature-") and not hasText(h, "Tester"), "a GUID or the player's name in the health: " .. h.log[1])
 	check(ns.Guard.session.errors == before + 1, "not counted for this session")
+	-- a game API that says no is counted and kept as a sample, but it is no problem to tell the player about
+	local api = ns.Guard.session.api
+	ns.safe(function() error("the game says no") end)
+	check(ns.Guard.session.api == api + 1 and ns.Guard.session.errors == before + 1 and h.errs.other == 1, "an API error counted as the addon's own")
 	-- the same error again: counted, but not a second sample
 	MOCK.Fire("QUEST_TURNED_IN", 95900, 100, 0)
-	check(h.errors == 2 and #h.log == 1, "the same sample twice")
+	check(h.errors == 3 and #h.log == 2, "the same sample twice")
 	unstubAll()
 	-- and the next event is handled as ever
 	MOCK.Fire("QUEST_TURNED_IN", 95900, 100, 0)
@@ -37,6 +41,7 @@ step("errors: a handler that throws is counted by its event, with a sample that 
 	MOCK.log = {}
 	SlashCmdList.EVERLOOKDB("errors")
 	check(table.concat(MOCK.log, " "):find("event:QUEST_TURNED_IN x2", 1, true), "/edb errors: " .. table.concat(MOCK.log, " / "))
+	check(table.concat(ns.Problems(), " "):find("2 errors while recording", 1, true), "problems count the addon's own errors only: " .. table.concat(ns.Problems(), " "))
 	check(table.concat(ns.Problems(), " "):find("while recording since you logged in", 1, true), "status doesn't say so")
 end)
 
@@ -112,7 +117,8 @@ step("loot: a window that closes with an item unread is left out of the drop cou
 	check(h.notes and h.notes.lootUnread == 1, "not noted")
 	local n = EverlookDBData.npc[4113]
 	check(n and n.p and n.p[1429] and n.p[1429]["300:300"] == 1, "the corpse's spot was lost")
-	check(table.concat(ns.Problems(), " "):find("1 loot window couldn't be read fully", 1, true), "status doesn't say so")
+	check(table.concat(ns.Notes(), " "):find("1 loot window couldn't be read fully", 1, true), "status doesn't say so")
+	check(not table.concat(ns.Problems(), " "):find("loot window", 1, true), "a note shown as a problem")
 	-- coins have no item link and are no reason to wait
 	unstubAll()
 	lootWorld({ { guid = "Creature-0-1-2-3-4114-0000AD0007", id = 2589 }, { guid = "Creature-0-1-2-3-4114-0000AD0007", type = 2 } })

@@ -1,5 +1,10 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- `/edb status` lists as problems only what needs your attention. Things that were merely left out, like a loot window the game was too slow to show, are plain notes.
+- The window opens quickly with a big data file.
+
 ## v0.8.1 (2026-11-24)
 
 - Opening a clam, lockbox or other container from your bags is no longer reported as a loot window that couldn't be read.

@@ -106,6 +106,30 @@ function ns.CoverageLine()
   return s, g
 end
 
+-- The file's size, walked at most once a minute (it reads every value)
+local sizeAt, sizeWas
+local function fileSize(db)
+  local now = GetTime()
+  if not sizeWas or now - sizeAt > 60 or now < sizeAt then sizeAt, sizeWas = now, Care.Size(db) end
+  return sizeWas
+end
+
+-- Worth knowing, nothing to do about: what was left out and why
+function ns.Notes()
+  local out = {}
+  local db = ns.Data()
+  local h = db and type(db.health) == "table" and db.health or {}
+  local notes = type(h.notes) == "table" and h.notes or {}
+  if (notes.lootUnread or 0) > 0 then
+    out[#out + 1] = plural(notes.lootUnread, "loot window", "loot windows") .. " couldn't be read fully and "
+      .. (notes.lootUnread == 1 and "was" or "were") .. " left out of the drop counts (the spot was kept)."
+  end
+  if (notes.repaired or 0) > 0 then
+    out[#out + 1] = plural(notes.repaired, "damaged entry", "damaged entries") .. " in the data file " .. (notes.repaired == 1 and "was" or "were") .. " mended."
+  end
+  return out
+end
+
 -- Everything that is not as it should be, in plain words; empty when all is well
 function ns.Problems()
   local out = {}
@@ -118,9 +142,6 @@ function ns.Problems()
     out[#out + 1] = "The game doesn't offer " .. table.concat(h.missing, ", ") .. ": some things can't be recorded."
   end
   if h.item == "none" then out[#out + 1] = "The game gives no item info: loot can't be recorded." end
-  if type(h.noEvent) == "table" and #h.noEvent > 0 then
-    out[#out + 1] = "The game doesn't know these events, so what they bring isn't recorded: " .. table.concat(h.noEvent, ", ") .. "."
-  end
   if ns.GuidTrust and not ns.GuidTrust.stable then
     out[#out + 1] = "The game gives changing creature IDs: counting carefully, by place and time."
   end
@@ -130,14 +151,7 @@ function ns.Problems()
       .. table.concat(sortedCounts(s.kinds, 4), ", ") .. "). The rest was recorded. /edb errors lists them."
   end
   local notes = type(h.notes) == "table" and h.notes or {}
-  if (notes.lootUnread or 0) > 0 then
-    out[#out + 1] = plural(notes.lootUnread, "loot window", "loot windows") .. " couldn't be read fully and "
-      .. (notes.lootUnread == 1 and "was" or "were") .. " left out of the drop counts (the spot was kept)."
-  end
-  if (notes.repaired or 0) > 0 then
-    out[#out + 1] = plural(notes.repaired, "damaged entry", "damaged entries") .. " in the data file " .. (notes.repaired == 1 and "was" or "were") .. " mended."
-  end
-  local size = Care.Size(db)
+  local size = fileSize(db)
   if size >= Care.WARN then
     out[#out + 1] = ("The data file is about %.1f MB; uploads take up to %d MB. %s"):format(size / 1048576, Care.LIMIT / 1048576,
       (notes.compacted or 0) > 0 and "The finest position detail was thinned out to keep it small." or "It is thinned out by itself before it gets there.")
@@ -167,6 +181,7 @@ function ns.ReportLines()
   else
     for _, p in ipairs(problems) do out[#out + 1] = "|cffef5d5dProblem:|r " .. p end
   end
+  for _, n in ipairs(ns.Notes()) do out[#out + 1] = "Note: " .. n end
   return out
 end
 
@@ -179,5 +194,8 @@ function ns.ErrorLines()
   if #kinds == 0 and (tonumber(h.errors) or 0) == 0 then return { "No errors noted on this game version." } end
   out[#out + 1] = (tonumber(h.errors) or 0) .. " errors noted on this game version (" .. tostring(h.build or "?") .. "): " .. table.concat(kinds, ", ")
   for _, l in ipairs(type(h.log) == "table" and h.log or {}) do out[#out + 1] = "  " .. tostring(l) end
+  if type(h.noEvent) == "table" and #h.noEvent > 0 then
+    out[#out + 1] = "Events this game version doesn't have: " .. table.concat(h.noEvent, ", ")
+  end
   return out
 end

@@ -15,7 +15,8 @@ local MAX_KINDS, MAX_LOG, MAX_MSG, MAX_COUNT = 40, 20, 140, 1000000
 
 local health            -- EverlookDBData.health, once the data is loaded
 local early = {}        -- noted before that: { kind, msg, counted }
-local session = { errors = 0, kinds = {} }
+-- since login: errors in the addon's own handlers (errors, kinds), and game API calls that threw (api)
+local session = { errors = 0, kinds = {}, api = 0 }
 G.session = session
 
 -- An error message as it is kept: no addon path, nothing GUID-shaped, no quoted text (it could be a name), short.
@@ -80,8 +81,7 @@ end
 -- A sample for an error the caller has counted itself (EverlookDB.lua's safe() counts API errors by name).
 function G.sample(kind, msg)
   kind, msg = kindName(kind), clean(msg)
-  session.errors = session.errors + 1
-  session.kinds[kind] = (session.kinds[kind] or 0) + 1
+  session.api = session.api + 1
   if health then addSample(health, kind, msg) elseif #early < 50 then early[#early + 1] = { kind, msg, false } end
 end
 

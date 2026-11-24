@@ -26,7 +26,7 @@ if not G or not Care then
     note = function() end, sample = function() end, count = function() end, bind = function() end,
     run = function(_, f, ...) return pcall(f, ...) end,
     wrap = function(_, f) return function(...) pcall(f, ...) end end,
-    session = { errors = 0, kinds = {} },
+    session = { errors = 0, kinds = {}, api = 0 },
   }
   Care = Care or {
     Repair = function(d)
@@ -45,6 +45,7 @@ if not G or not Care then
   local restart = "The addon was updated while the game was running. Restart the game to finish the update; it keeps recording meanwhile."
   ns.ReportLines = function() return { restart } end
   ns.Problems = function() return { restart } end
+  ns.Notes = function() return {} end
   ns.RecentLines = function() return {} end
   ns.CoverageLine = function() return nil end
   ns.ErrorLines = function() return { restart } end
