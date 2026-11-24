@@ -26,6 +26,13 @@ app:Setting({
 })
 
 app:Setting({
+  key = "problemmessage", type = "bool", label = "Say in chat when something goes wrong while recording",
+  desc = "One line a session at most. /edb status always says what happened.",
+  keywords = { "error", "problem", "warning", "message", "quiet" },
+  get = function() return S().problemMessage end, set = function(v) S().problemMessage = v end,
+})
+
+app:Setting({
   key = "sparkles", type = "bool", label = "Show quest item sparkles",
   desc = "Keeps the glitter on quest objects you can loot, even after a graphics preset turns it off.",
   keywords = { "sparkle", "glitter", "shine", "quest item", "loot effect", "outline", "highlight", "graphics" },
@@ -50,7 +57,13 @@ end
 -- /edb on, off, toggle: recording (/edb pause and /edb resume still work). status and feedback come from EverlookUI.
 app:OnOff({ label = "Recording", get = function() return not ns.IsPaused() end, set = function(on) ns.SetPaused(not on) end })
 app:StatusLines(function()
-  return { StatusLine(), "Upload " .. FILE .. " on EverlookDB.com, or let the EverlookDB App do it." }
+  local lines = { StatusLine() }
+  for _, l in ipairs(ns.ReportLines()) do lines[#lines + 1] = l end
+  lines[#lines + 1] = "Upload " .. FILE .. " on EverlookDB.com, or let the EverlookDB App do it."
+  return lines
+end)
+app:Command("errors", "errors", "what went wrong while recording, if anything", function()
+  for _, l in ipairs(ns.ErrorLines()) do app:Print(l) end
 end)
 app:Command("save", "save", "write the data file now (reloads the UI)", function() ns.Save() end)
 app:Command("pause", "pause", "stop recording", function() SetPaused(true) end).hidden = true
@@ -79,6 +92,24 @@ app:Section("status", "Status", function(stack)
     return beasts .. "  (" .. tames .. " tames, " .. lore .. " Beast Lore reads)"
   end)
   UI.Stat(stack, "Collecting since", function() local t = ns.Status().since; return t and date("%Y-%m-%d", t) or "-" end)
+
+  UI.Header(stack, "Lately", "What was recorded where, newest first. /edb status shows the same in chat.")
+  for i = 1, 4 do
+    UI.Stat(stack, i == 1 and "Recorded lately" or "", function()
+      local l = ns.RecentLines()[i]
+      return l or (i == 1 and "nothing since you logged in yet" or "")
+    end)
+  end
+  UI.Stat(stack, "Where the NPCs are", function()
+    local _, g = ns.CoverageLine()
+    if not g then return "-" end
+    return ("%d on the map, %d roughly, %d in dungeons, %d only by zone, %d nowhere yet"):format(g.exact, g.approx, g.inst, g.zoneOnly, g.noLoc)
+  end)
+  UI.Stat(stack, "Problems", function()
+    local p = ns.Problems()
+    if #p == 0 then return "|cff62cf88none|r" end
+    return "|cffef5d5d" .. #p .. "|r: " .. p[1] .. (#p > 1 and "  (/edb status lists them all)" or "")
+  end)
 
   UI.Header(stack, "Saving and uploading", "The game writes the data file only when you log out or reload.")
   UI.Stat(stack, "Changed since the last save", function() return ns.Status().unsaved .. " records" end)
@@ -118,6 +149,7 @@ end)
 app:Section("options", "Options", function(stack)
   UI.Header(stack, "Saving")
   app:Widget(stack, "savedmessage")
+  app:Widget(stack, "problemmessage")
   UI.Header(stack, "Quest items")
   app:Widget(stack, "sparkles")
   UI.Note(stack, "It switches the unit outline off (Graphics > Outline Mode), because the game only shows the glitter without it. Turning this off gives your outline mode back; restart the game if the glitter stays.")

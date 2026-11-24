@@ -16,6 +16,42 @@
 
 local ADDON, ns = ...
 local VERSION = 1
+local G, Care = ns.Guard, ns.Care  -- Guard.lua (errors, tally), Care.lua (repair, migrations, gaps, size)
+if not G or not Care then
+  -- The game only loads files it saw when it started. After an update that added Guard.lua, Care.lua and
+  -- Report.lua, a /reload runs this file without them: recording goes on as before with these stand-ins, and
+  -- /edb status says to restart the game.
+  ns.NeedsRestart = true
+  G = G or {
+    note = function() end, sample = function() end, count = function() end, bind = function() end,
+    run = function(_, f, ...) return pcall(f, ...) end,
+    wrap = function(_, f) return function(...) pcall(f, ...) end end,
+    session = { errors = 0, kinds = {} },
+  }
+  Care = Care or {
+    Repair = function(d)
+      for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast" }) do
+        if type(d[name]) ~= "table" then d[name] = {} end
+      end
+      return 0
+    end,
+    Migrate = function() return 0 end,
+    LocaleChanged = function() return false end,
+    Gaps = function() return {} end,
+    Size = function() return 0 end,
+    Compact = function() return 0, 0 end,
+  }
+  ns.Guard, ns.Care = G, Care
+  local restart = "The addon was updated while the game was running. Restart the game to finish the update; it keeps recording meanwhile."
+  ns.ReportLines = function() return { restart } end
+  ns.Problems = function() return { restart } end
+  ns.RecentLines = function() return {} end
+  ns.CoverageLine = function() return nil end
+  ns.ErrorLines = function() return { restart } end
+end
+ns.Tally = ns.Tally or function() end
+ns.PlaceChanged = ns.PlaceChanged or function() end
+local function tally(what, n, npc) ns.Tally(what, n, npc) end
 -- These three shape the data every player uploads, so they are not options.
 local SPAWN_GRID = 5        -- positions are kept on a 0.5% grid of the zone map
 local SPAWNS_PER_MAP = 150  -- most grid cells kept per NPC or node per map
@@ -31,6 +67,7 @@ ns.SETTINGS_DEFAULTS = {
   version = 1,
   paused = false,
   savedMessage = true,      -- "data saved" in chat after a save
+  problemMessage = true,    -- one chat line a session when something went wrong while recording
   questSparkles = true,     -- keep the glitter on lootable quest objects (Sparkles.lua)
 }
 
@@ -97,6 +134,7 @@ local function safe(f, ...)
       if not h.errs[name] then for _ in pairs(h.errs) do n = n + 1 end end
       if h.errs[name] or n < MAX_ERROR_NAMES then h.errs[name] = math.min((h.errs[name] or 0) + 1, 1000000) end
     end
+    G.sample(apiName(f), r[2])  -- what it said, kept as a short sample (Guard.lua)
     return nil
   end
   for i = 2, r.n do r[i] = ok(r[i]) end
@@ -409,6 +447,7 @@ ns.OwnerTitle = ownerTitle
 -- "Level ??" (a creature far above you) is the level line, not a title
 local LEVEL_WORD = type(LEVEL) == "string" and LEVEL ~= "" and LEVEL or "Level"
 local function isLevelLine(text) return text:sub(1, #LEVEL_WORD) == LEVEL_WORD end
+ns.IsLevelLine = isLevelLine
 
 -- here: { map, x, y } from where(), when the caller already has it (the nameplate scan reads it once a tick)
 -- near: true within about 10 yards (an exact spot), "close" within about 28 (an approximate spot, rec.pa)
@@ -431,6 +470,7 @@ local function readUnit(unit, near, here)
   end
   watchGUID(unit, guid, id)
   local rec = npcRecord(id)
+  tally(nil, nil, id)
   rec.name = ok(UnitName(unit)) or rec.name
   local lvl = ok(UnitLevel(unit))
   if lvl then
@@ -443,7 +483,9 @@ local function readUnit(unit, near, here)
   if rec.name then  -- updated in place: the nameplate scan passes here for every plate every second
     local r = recent[rec.name]
     if not r then r = {}; recent[rec.name] = r end
-    r.id, r.lvl, r.at = id, lvl, GetTime()
+    -- a level the game hides right now (combat) keeps the one seen a moment ago for the same NPC
+    if r.id ~= id then r.lvl = nil end
+    r.id, r.lvl, r.at = id, lvl or r.lvl, GetTime()
   end
   local hp = ok(UnitHealthMax(unit))  -- hidden in some places; then unknown
   if lvl and lvl > 0 and hp and hp > 0 then
@@ -477,10 +519,13 @@ local function readUnit(unit, near, here)
     rec.react = rec.react or {}
     rec.react[faction] = reaction  -- 1-3 hostile, 4 neutral, 5+ friendly, for that player faction
   end
-  if not scanned[id] then
-    scanned[id] = true
+  -- the tooltip (title, skinnable): read until the game gave it once; hidden in combat, so up to 5 tries a session
+  if scanned[id] ~= true then
+    scanned[id] = (scanned[id] or 0) + 1
+    if scanned[id] >= 5 then scanned[id] = true end
     local data = safe(C_TooltipInfo.GetUnit, unit)
     if data and data.lines then
+      scanned[id] = true
       for i, l in ipairs(data.lines) do
         local text = ok(l.leftText)
         if text then
@@ -547,8 +592,10 @@ local looted = seenSet(2000)  -- "kind..guid" already counted this session (the 
 -- without trusted GUIDs: the same kind of loot from the same NPC or object near the same spot (a 2% cell) within
 -- 30 seconds is the same corpse or node opened again
 local lootedRecent = recentSet(2000, 30, false)
-local lootDone = false
-local moneyBefore, moneySources = 0, nil
+local lootDone, lootSig, lootDoneAt = false, nil, 0
+local pendingLoot  -- { read }: a window with something not readable yet; looked at again, counted when it closes
+local moneyBefore, moneySources = nil, nil
+local LOOT_ITEM = (Enum and Enum.LootSlotType and rawget(Enum.LootSlotType, "Item")) or 1
 
 local function lootKind(sourceKind)
   if safe(IsFishingLoot) then return "f" end
@@ -603,17 +650,18 @@ local function readCorpse(id, guid)
   changes = changes + 1
 end
 
-local function readLoot()
-  if paused or lootDone then return end
-  local slots = GetNumLootItems() or 0
-  if slots == 0 then return end
-  lootDone = true
-  changes = changes + 1
-
+-- Read the open loot window, counting nothing yet. -> nil when it is empty, else
+--   { sources, order, fished, fishing, bad, sig }
+-- bad: item slots that can't be counted right now (the item is still loading, or the game hides what it came from).
+local function scanLoot()
+  local slots = num(safe(GetNumLootItems)) or 0
+  if slots == 0 then return nil end
   -- per source: items it gave. A source is its GUID while GUIDs are stable, else its type and id (one corpse whose
   -- GUID reads differently per slot is still one corpse)
   local sources, order = {}, {}
   local fished = {}  -- every slot's items, for fishing (which has no mob or object)
+  local fishing = safe(IsFishingLoot) and true or false
+  local bad, sig = 0, { slots }
   local function src(guid)
     local sk, id = parseGUID(guid)
     if not sk then return nil end
@@ -623,55 +671,91 @@ local function readLoot()
     return s
   end
   for slot = 1, slots do
-    local link = ok(GetLootSlotLink(slot))
-    local id = itemID(link)
-    local info = { safe(GetLootSourceInfo, slot) }
-    for j = 1, #info, 2 do
-      local guid, qty = ok(info[j]), info[j + 1]
-      if guid and id then fished[id] = (fished[id] or 0) + (qty or 1) end
-      local s = guid and src(guid)
-      if s and id then s.items[id] = (s.items[id] or 0) + (qty or 1) end
+    local id = itemID(safe(GetLootSlotLink, slot))
+    -- coins and currencies have no item link; an item slot without one is an item that hasn't loaded yet
+    local isItem = id ~= nil or (GetLootSlotType ~= nil and num(safe(GetLootSlotType, slot)) == LOOT_ITEM)
+    local info = pack(safe(GetLootSourceInfo, slot))
+    local credited = false
+    for j = 1, info.n, 2 do
+      local guid, qty = info[j], num(info[j + 1]) or 1
+      if type(guid) == "string" then
+        if id and fishing then fished[id] = (fished[id] or 0) + qty; credited = true end
+        local s = src(guid)
+        if s then
+          if id then s.items[id] = (s.items[id] or 0) + qty; credited = true
+          elseif isItem then s.bad = true end
+          sig[#sig + 1] = s.sk .. s.id .. ":" .. (id or 0)
+        end
+      end
     end
+    if fishing and id and not credited then
+      -- a catch the game names no source for: its quantity from the slot itself
+      local qty
+      if GetLootSlotInfo then local _; _, _, qty = safe(GetLootSlotInfo, slot) end
+      fished[id] = (fished[id] or 0) + (num(qty) or 1)
+      credited = true
+    end
+    if isItem and not credited then bad = bad + 1; sig[#sig + 1] = "?" .. (id or 0) end
   end
+  return { sources = sources, order = order, fished = fished, fishing = fishing, bad = bad, sig = table.concat(sig, ",") }
+end
 
-  local fishing = safe(IsFishingLoot)
-  if fishing then
+local function countItems(items)
+  local n = 0
+  for _ in pairs(items) do n = n + 1 end
+  return n
+end
+
+-- Count a loot window that was read. A window with an item that couldn't be read is left out of the drop counts
+-- altogether: counting the corpse without that item would make the item look rarer than it is. Its place is kept.
+local function countLoot(read)
+  changes = changes + 1
+  if read.fishing then
     lastCast = nil
+    if read.bad > 0 then G.count("lootUnread"); tally("unread"); return end
     -- fishing has no mob or object: key it by zone map
     local map = where()
     local rec = lootRecord("f:" .. (map or 0))
     rec.n = rec.n + 1
-    for id, qty in pairs(fished) do
+    for id, qty in pairs(read.fished) do
       local it = rec.i[id] or { 0, 0 }
       it[1], it[2] = it[1] + 1, it[2] + qty
       rec.i[id] = it
     end
+    tally("loot"); tally("items", countItems(read.fished))
     return
   end
 
   local map, x, y = where()
   local inst = instanceMap()
+  local order, unread = read.order, false
   moneySources = {}
   for _, skey in ipairs(order) do
-    local s = sources[skey]
+    local s = read.sources[skey]
     local sk, id, guid = s.sk, s.id, s.guid
     do
       local kind = lootKind(sk)
       local fallback = kind .. ":" .. id .. "@" .. tostring(map or inst) .. ":" .. cell(x, y, 20)
       if firstSight(looted, lootedRecent, kind .. guid, fallback) then
         local key = kind .. ":" .. id
-        local rec = lootRecord(key)
-        rec.n = rec.n + 1
-        for item, qty in pairs(s.items) do
-          local it = rec.i[item] or { 0, 0 }   -- { times it dropped, total quantity }
-          it[1], it[2] = it[1] + 1, it[2] + qty
-          rec.i[item] = it
+        if read.bad > 0 or s.bad then
+          unread = true
+        else
+          local rec = lootRecord(key)
+          rec.n = rec.n + 1
+          for item, qty in pairs(s.items) do
+            local it = rec.i[item] or { 0, 0 }   -- { times it dropped, total quantity }
+            it[1], it[2] = it[1] + 1, it[2] + qty
+            rec.i[item] = it
+          end
+          moneySources[#moneySources + 1] = rec
+          if inst then rec.zi = rec.zi or {}; rec.zi[inst] = (rec.zi[inst] or 0) + 1 end  -- looted in that dungeon
+          tally("loot"); tally("items", countItems(s.items))
         end
-        moneySources[#moneySources + 1] = rec
-        if inst then rec.zi = rec.zi or {}; rec.zi[inst] = (rec.zi[inst] or 0) + 1 end  -- looted in that dungeon
         -- where it was: corpses mark NPC spawns, objects mark node spawns
         if sk == "u" then
           local npc = npcRecord(id)
+          tally(nil, nil, id)
           seenIn(npc, inst)
           if inst and #order == 1 then readCorpse(id, guid) end
           addSpot(npc, x and map or inst or map, x, y, guid, id)  -- not again when it was counted alive
@@ -688,28 +772,59 @@ local function readLoot()
       end
     end
   end
+  if unread then G.count("lootUnread"); tally("unread") end
   -- a skinning, gathering or pick pocket cast names one loot window only: the next corpse you loot within
   -- a few seconds is a plain corpse again
   lastCast = nil
-  moneyBefore = GetMoney()
+  moneyBefore = num(safe(GetMoney))
+end
+
+local function finishLoot(read)
+  pendingLoot = nil
+  lootDone, lootSig, lootDoneAt = true, read.sig, GetTime()
+  countLoot(read)
+end
+
+-- LOOT_READY and LOOT_OPENED both come for one window: it is read once. A window with something still loading is
+-- looked at again (0.2 s, 0.6 s, and when it closes) and counted with what could be read by then.
+-- last: count it now, whatever is still unreadable
+local readLoot
+readLoot = function(last)
+  if paused then return end
+  local read = scanLoot()
+  if not read then return end
+  -- the same window again; another one here means its LOOT_CLOSED never came
+  if lootDone and read.sig == lootSig and GetTime() - lootDoneAt < 60 then return end
+  if read.bad == 0 or last == true then return finishLoot(read) end
+  if pendingLoot then pendingLoot.read = read; return end
+  local p = { read = read }
+  pendingLoot = p
+  C_Timer.After(0.2, G.wrap("timer:loot", function() if pendingLoot == p then readLoot() end end))
+  C_Timer.After(0.6, G.wrap("timer:loot", function() if pendingLoot == p then readLoot(true) end end))
 end
 
 local function lootClosed()
+  -- state first: whatever fails below, the next loot window is read
+  local p = pendingLoot
+  pendingLoot = nil
+  if p then G.run("loot:closing", finishLoot, p.read) end
+  local sources, before = moneySources, moneyBefore
+  moneySources, moneyBefore, lootDone, lootSig = nil, nil, false, nil
   -- money is credited only when one source was looted, so it can be attributed
-  if moneySources and #moneySources == 1 then
-    local gained = GetMoney() - moneyBefore
-    if gained > 0 then
-      local rec = moneySources[1]
-      rec.m = (rec.m or 0) + gained
+  if sources and #sources == 1 and before and not p then
+    local now = num(safe(GetMoney))
+    if now and now > before then
+      local rec = sources[1]
+      rec.m = (rec.m or 0) + (now - before)
       rec.mn = (rec.mn or 0) + 1
     end
   end
-  moneySources = nil
-  lootDone = false
 end
 
 ---------------------------------------------------------------------------------------------------
 -- Vendors
+
+local merchantOpen = false   -- (buying prints the same "You receive item" line as a quest reward)
 
 -- A currency's id, from its link ("currency:3402") or, as the merchant cost gives only its name, from the
 -- player's currency list. nil when unknown: the site takes only ids.
@@ -759,49 +874,77 @@ local function fixVendorCosts(data)
 end
 ns.FixVendorCosts = fixVendorCosts
 
+-- -> items whose link the game hasn't loaded yet (read again a moment later)
 local function readVendor()
   if paused then return end
   local kind, id = parseGUID(UnitGUID("npc"))
   if kind ~= "u" then return end
-  local rec = readUnit("npc", true) or npcRecord(id)
-  local v = db.vendor[id] or {}
-  db.vendor[id] = v
-  v.i = v.i or {}
-  local reaction = ok(UnitReaction("npc", "player"))
+  local _ = readUnit("npc", true) or npcRecord(id)
+  local v = db.vendor[id]
+  if type(v) ~= "table" then v = {}; db.vendor[id] = v end
+  if type(v.i) ~= "table" then v.i = {} end
+  local reaction = num(UnitReaction("npc", "player"))
   local missing = 0
-  for slot = 1, (GetMerchantNumItems() or 0) do
-    local item = itemID(GetMerchantItemLink(slot))
+  for slot = 1, (num(safe(GetMerchantNumItems)) or 0) do
+    local item = itemID(safe(GetMerchantItemLink, slot))
     if not item then
       missing = missing + 1
     else
       local price, stack, avail, extended
       if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
         local info = safe(C_MerchantFrame.GetItemInfo, slot)
-        if info then price, stack, avail, extended = info.price, info.stackCount, info.numAvailable, info.hasExtendedCost end
+        if type(info) == "table" then price, stack, avail, extended = info.price, info.stackCount, info.numAvailable, info.hasExtendedCost end
       else
         local _
         _, _, price, stack, avail, _, _, extended = safe(GetMerchantItemInfo, slot)
       end
-      local e = { price = price, stack = stack, limited = (avail and avail >= 0) and 1 or nil, react = reaction }
+      price, stack, avail, extended = num(price), num(stack), num(avail), ok(extended)
+      -- What the game doesn't give this time keeps its saved value: a half-read line never wipes a full one.
+      local e = type(v.i[item]) == "table" and v.i[item] or {}
+      v.i[item] = e
+      if price then e.price = price end
+      if stack then e.stack = stack end
+      if avail then e.limited = avail >= 0 and 1 or nil end
+      if reaction then e.react = reaction end
       if extended then
-        -- "item:123x2,currency:3402x60"; left out when any part is unknown (a partial cost would read as cheaper)
+        -- "item:123x2,currency:3402x60"; left as it was when any part is unknown (a partial cost would read as cheaper)
         local costs = {}
         for c = 1, (num(safe(GetMerchantItemCostInfo, slot)) or 0) do
           local _, amount, link, currency = safe(GetMerchantItemCostItem, slot, c)
-          local cid, kind = itemID(link), "item"
-          if not cid then cid, kind = currencyID(link, currency), "currency" end
+          local cid, ckind = itemID(link), "item"
+          if not cid then cid, ckind = currencyID(link, currency), "currency" end
           amount = num(amount)
           if not cid or not amount or amount <= 0 then costs = nil; break end
-          costs[#costs + 1] = kind .. ":" .. cid .. "x" .. amount
+          costs[#costs + 1] = ckind .. ":" .. cid .. "x" .. amount
         end
-        e.cost = costs and #costs > 0 and table.concat(costs, ",") or nil
+        if costs and #costs > 0 then e.cost = table.concat(costs, ",") end
+      elseif extended == false then
+        e.cost = nil
       end
-      v.i[item] = e
     end
   end
   v.t = time()
   changes = changes + 1
   return missing
+end
+
+-- The merchant window opened: read it now, and again while items are still loading (1.5 s, then 4 s later).
+local function vendorOpened()
+  if paused then return end
+  tally("vendors")
+  local waits, try = { 1.5, 4 }, 0
+  local function again()
+    if paused or not merchantOpen then return end
+    local missing = readVendor()
+    if not missing or missing == 0 then return end  -- (0 is true in Lua)
+    try = try + 1
+    if waits[try] then
+      C_Timer.After(waits[try], G.wrap("timer:vendor", again))
+    else
+      G.count("vendorItemsUnread", missing)  -- still loading after 5 s: read at the next visit
+    end
+  end
+  again()
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -898,38 +1041,74 @@ local function questDetail(startItem)
   readRewards(q)
 end
 
-local function questAccepted(qid, retried)
+-- objective lines that say what to do ("item|1|" with no text is one that never finished loading)
+local function goodLines(list)
+  local n = 0
+  for _, line in ipairs(type(list) == "table" and list or {}) do
+    if type(line) == "string" and line:match("^[^|]*|[^|]*|.*%S") then n = n + 1 end
+  end
+  return n
+end
+ns.GoodLines = goodLines
+
+-- try: nil for the event itself; 1.. for the looks after it while an objective was still loading
+local OBJECTIVE_WAITS = { 1, 3, 8 }
+local function questAccepted(qid, try)
   qid = num(qid)
-  if paused or not qid or qid <= 0 then return end
+  if paused or not qid or qid <= 0 or type(C_QuestLog) ~= "table" then return end
   local q = questRecord(qid)
   local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
   local info = idx and safe(C_QuestLog.GetInfo, idx)
-  if info then
+  if type(info) == "table" then
     q.title = noName(ok(info.title)) or q.title
-    q.level = ok(info.level) or q.level
-    q.group = ok(info.suggestedGroup) or q.group
+    q.level = num(info.level) or q.level
+    q.group = num(info.suggestedGroup) or q.group
   end
   local objectives = safe(C_QuestLog.GetQuestObjectives, qid)
   if type(objectives) == "table" and #objectives > 0 then
     local out, loading = {}, false
     for _, o in ipairs(objectives) do
-      local text = type(o) == "table" and noName(ok(o.text))
+      local isTable = type(o) == "table"
+      local text = isTable and noName(ok(o.text))
       -- drop the player's progress ("3/10 ") so every upload reads the same
       text = type(text) == "string" and text:gsub("^%d+/%d+%s*", "") or ""
-      local otype, need = ok(o.type), num(o.numRequired)
-      if text ~= "" then
+      local otype, need = isTable and ok(o.type), isTable and num(o.numRequired)
+      if text:find("%S") then
         out[#out + 1] = (type(otype) == "string" and otype or "") .. "|" .. (need or "") .. "|" .. text
       else
         loading = true  -- an item objective whose item isn't loaded yet reads "" for a moment
       end
     end
-    -- a list with a line still loading doesn't replace a complete one
-    if #out > 0 and (not loading or not q.objectives) then q.objectives = out end
-    if loading and not retried then
-      C_Timer.After(1, function() if not paused then questAccepted(qid, true) end end)
+    -- a list with a line still loading replaces only a list that says less
+    if #out > 0 and (not loading or #out > goodLines(q.objectives)) then q.objectives = out end
+    try = try or 0
+    if loading and OBJECTIVE_WAITS[try + 1] then
+      C_Timer.After(OBJECTIVE_WAITS[try + 1], G.wrap("timer:quest", function() questAccepted(qid, try + 1) end))
     end
   end
 end
+
+-- Quests in the log whose objectives were never read in full (taken during a loading screen, before the addon was
+-- installed, or with an item that hadn't loaded): read now. Each quest once a session.
+local swept = {}
+local function sweepQuestLog()
+  if paused or not db or not (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo) then return end
+  local n = num(safe(C_QuestLog.GetNumQuestLogEntries)) or 0
+  for i = 1, math.min(n, 80) do
+    local info = safe(C_QuestLog.GetInfo, i)
+    local qid = type(info) == "table" and not ok(info.isHeader) and num(info.questID)
+    if qid and qid > 0 and not swept[qid] then
+      swept[qid] = true
+      local q = db.quest[qid]
+      local have = type(q) == "table" and type(q.objectives) == "table" and #q.objectives or 0
+      if have == 0 or goodLines(q.objectives) < have then
+        if type(q) ~= "table" then G.count("questFromLog") end
+        questAccepted(qid)
+      end
+    end
+  end
+end
+ns.SweepQuestLog = sweepQuestLog
 
 local function questProgress()
   if paused then return end
@@ -951,9 +1130,9 @@ local function questComplete()
   local map, x, y = where()
   if map and x then q.toAt = map .. ":" .. x .. ":" .. y end
   if readRewards(q) then
-    C_Timer.After(0.5, function()
+    C_Timer.After(0.5, G.wrap("timer:quest", function()
       if not paused and ok(GetQuestID()) == qid then readRewards(q) end
-    end)
+    end))
   end
 end
 
@@ -1026,7 +1205,7 @@ local function watchTurnIn(qid)
   end
   early = {}
   watch = w
-  C_Timer.After(GOT_WINDOW + 0.1, function() if watch == w then closeWatch() end end)
+  C_Timer.After(GOT_WINDOW + 0.1, G.wrap("timer:handin", function() if watch == w then closeWatch() end end))
 end
 
 -- CURRENCY_DISPLAY_UPDATE: (currencyID, quantity, quantityChange, ...); only plain numbers are compared
@@ -1049,7 +1228,6 @@ local function chatGain(text, one, many, linkKind)
   return tonumber(link:match(linkKind .. ":(%d+)")), tonumber(n)
 end
 
-local merchantOpen = false   -- buying prints the same "You receive item" line: not a quest reward
 local function lootLine(text)
   text = ok(text)
   if paused or merchantOpen or type(text) ~= "string" then return end
@@ -1082,20 +1260,25 @@ end
 local function readTrainer()
   local id = service("train")
   if not id then return end
-  local t = db.trainer[id] or {}
+  local t = type(db.trainer[id]) == "table" and db.trainer[id] or {}
   db.trainer[id] = t
-  t.s = t.s or {}
-  for i = 1, (safe(GetNumTrainerServices) or 0) do
+  if type(t.s) ~= "table" then t.s = {} end
+  for i = 1, (num(safe(GetNumTrainerServices)) or 0) do
     local name, sub, kind = safe(GetTrainerServiceInfo, i)
     if name and kind ~= "header" then
       local tip = C_TooltipInfo and C_TooltipInfo.GetTrainerService and safe(C_TooltipInfo.GetTrainerService, i)
       local spell = tip and ok(tip.id)
       local key = spell or (sub and sub ~= "" and (name .. " (" .. sub .. ")") or name)
-      t.s[key] = { c = safe(GetTrainerServiceCost, i), l = safe(GetTrainerServiceLevelReq, i) }
+      -- what the game doesn't give this time keeps its saved value
+      local e = type(t.s[key]) == "table" and t.s[key] or {}
+      t.s[key] = e
+      e.c = num(safe(GetTrainerServiceCost, i)) or e.c
+      e.l = num(safe(GetTrainerServiceLevelReq, i)) or e.l
     end
   end
   t.t = time()
   changes = changes + 1
+  tally("trainers")
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -1106,7 +1289,7 @@ local XP_RESTED = toPattern(_G.COMBATLOG_XPGAIN_EXHAUSTION1)    -- ... (%s exp %
 
 local function readKillXP(text)
   text = ok(text)
-  if paused or not text or not XP_PLAIN or IsInGroup() then return end
+  if paused or type(text) ~= "string" or not XP_PLAIN then return end
   local name, xp = text:match(XP_PLAIN)
   local bonus
   if not name and XP_RESTED then
@@ -1116,7 +1299,15 @@ local function readKillXP(text)
   end
   xp = tonumber(xp)
   local seen = name and recent[name]
-  if not xp or not seen or GetTime() - seen.at > 60 or not seen.lvl or seen.lvl < 1 then return end
+  if not seen or GetTime() - seen.at > 60 then return end
+  -- It died in a fight with you, so it was close by: a rough spot when no exact one is known on this map (creatures
+  -- you fight but never loot, and range can't be checked in combat).
+  local map, x, y = where()
+  local npc = db.npc[seen.id]
+  if map and x and npc and not hasCells(npc.p, map) and not hasCells(npc.pa, map) then
+    addSpot(npc, map, x, y, nil, seen.id, "pa")
+  end
+  if not xp or IsInGroup() or not seen.lvl or seen.lvl < 1 then return end
   local pl = ok(UnitLevel("player"))
   if not pl then return end
   xp = xp - (bonus or 0)
@@ -1125,6 +1316,7 @@ local function readKillXP(text)
   rec.xp = rec.xp or {}
   rec.xp[pl .. ":" .. seen.lvl] = xp   -- player level : mob level -> XP
   changes = changes + 1
+  tally("kills", 1, seen.id)
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -1141,34 +1333,56 @@ local function count(t)
   return n
 end
 
+local noEvent = {}  -- events the game refused to register: what they bring is not recorded, and the health says so
+
 local function init()
-  EverlookDBData = EverlookDBData or {}
+  if type(EverlookDBData) ~= "table" then
+    if EverlookDBData ~= nil then G.note("repair", "the saved data was not a table") end
+    EverlookDBData = {}
+  end
   db = EverlookDBData
-  db.format = VERSION
-  db.locale = GetLocale()
-  local version, build = GetBuildInfo()
-  db.builds = db.builds or {}
-  db.builds[version .. "." .. build] = true
-  -- the build and addon version this file is written by now: the site tags each upload with them
-  db.build = version .. "." .. build
-  local meta = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
-  db.addon = meta and safe(meta, ADDON, "Version") or nil
-  if ns.HealthCheck then ns.health = ns.HealthCheck(db, db.addon); ns.TrustCounts(ns.health.guid) end
-  db.since = db.since or time()
-  db.npc, db.loot, db.obj = db.npc or {}, db.loot or {}, db.obj or {}
-  db.vendor, db.quest = db.vendor or {}, db.quest or {}
-  -- older versions saved each quest's objective paragraph, which can hold your character's name: drop it
-  for _, q in pairs(db.quest) do q.objective = nil end
-  db.trainer = db.trainer or {}
-  db.beast = db.beast or {}
-  normalizeSpots(db)
-  -- titles that name an owner ("Nimsy's Guardian") saved before 0.2.0 could name a player: drop them
-  for _, rec in pairs(db.npc) do
-    if type(rec) == "table" and type(rec.title) == "string" and (ownerTitle(rec.title) or isLevelLine(rec.title)) then
-      rec.title = nil  -- ("Level ??" was taken for a title before 0.7.0)
+  G.bind(nil)  -- what goes wrong from here on is kept until this login's health exists
+  -- first of all a file every later step can rely on: tables are tables, rows are rows (Care.lua)
+  local okRepair, repaired = G.run("repair", Care.Repair, db)
+  if not okRepair then
+    for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast" }) do
+      if type(db[name]) ~= "table" then db[name] = {} end
     end
   end
-  fixVendorCosts(db)
+  db.format = VERSION
+  local version, build = safe(GetBuildInfo)
+  local buildKey = (version and build) and (version .. "." .. build) or nil
+  db.builds = db.builds or {}
+  if buildKey then db.builds[buildKey] = true end
+  -- the build and addon version this file is written by now: the site tags each upload with them
+  db.build = buildKey or db.build
+  local meta = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+  db.addon = meta and safe(meta, ADDON, "Version") or nil
+  if ns.HealthCheck then
+    local okHealth = G.run("init:health", function()
+      ns.health = ns.HealthCheck(db, db.addon)
+      ns.TrustCounts(ns.health.guid)
+    end)
+    if not okHealth or type(ns.health) ~= "table" then
+      ns.health = { build = buildKey or "?", addon = db.addon, errors = 0, guid = { checked = 0, badFormat = 0, changed = 0 } }
+      db.health = ns.health
+      ns.TrustCounts(ns.health.guid)
+    end
+    G.bind(ns.health)
+  end
+  if okRepair and (repaired or 0) > 0 then G.count("repaired", repaired) end
+  table.sort(noEvent)
+  if ns.health then ns.health.noEvent = #noEvent > 0 and noEvent or nil end
+  db.since = db.since or time()
+  -- names are kept in the game's language: a new language starts them again, the counts stay
+  local locale = GetLocale()
+  local okLocale, changed = G.run("init:locale", Care.LocaleChanged, db, locale)
+  if okLocale and changed then G.count("localeChanged") end
+  db.locale = locale
+  -- changes to the saved shape, each once per data file
+  local _, why = Care.Migrate(db, G.run)
+  ns.NewerData = (why == "newer") or nil
+  G.run("init:vendorCosts", fixVendorCosts, db)
   settings = ns.InitSettings(db)
   paused = settings.paused and true or false
 
@@ -1187,7 +1401,7 @@ local function isCorpse(text)
   return corpseBefore ~= nil and #text > #corpseBefore + #corpseAfter
     and text:sub(1, #corpseBefore) == corpseBefore and text:sub(#text - #corpseAfter + 1) == corpseAfter
 end
-GameTooltip:HookScript("OnShow", function(tip)
+GameTooltip:HookScript("OnShow", G.wrap("tooltip", function(tip)
   -- through safe(): in combat and instances these can be secret values, which can't be tested
   if safe(tip.GetOwner, tip) ~= UIParent then return end
   if tip.GetUnit and safe(tip.GetUnit, tip) then return end
@@ -1198,11 +1412,38 @@ GameTooltip:HookScript("OnShow", function(tip)
   -- a world object whose name is hidden (instances) or not taken: forget the last one, or the chest you open
   -- next would get the name of the chair you hovered before it
   if text and text ~= "" then lastObjectName, lastObjectAt = text, GetTime() else lastObjectName = nil end
-end)
+end))
 
 ---------------------------------------------------------------------------------------------------
 -- Saving: the game writes SavedVariables only on logout or reload; /edb save (or the window's Save button)
 -- reloads to write them now. No pop-up offers it: it can't be dismissed and sits in the middle of the screen.
+
+-- Just before the game writes the file (logout, reload): finish what is half done, then note how complete and
+-- how big the file is (health.gaps, health.rec, health.bytes) so the site can tell when something goes missing.
+local function beforeSave()
+  if not db then return end
+  G.run("save:handin", ns.CloseRewardWatch)
+  if pendingLoot then
+    local p = pendingLoot
+    pendingLoot = nil
+    G.run("save:loot", finishLoot, p.read)
+  end
+  G.run("save:care", function()
+    local h = ns.health
+    if type(h) ~= "table" then return end
+    local size, stages = Care.Compact(db)
+    if stages > 0 then G.count("compacted", stages) end
+    h.gaps = Care.Gaps(db)
+    h.bytes = size
+    -- what this file holds, by the addon's own count: the site compares it with what it could read
+    local looted = 0
+    for _, rec in pairs(db.loot) do looted = looted + (tonumber(rec.n) or 0) end
+    local function n(t) local c = 0; for _ in pairs(t) do c = c + 1 end; return c end
+    h.rec = { npc = n(db.npc), loot = n(db.loot), looted = looted, obj = n(db.obj), vendor = n(db.vendor),
+      quest = n(db.quest), trainer = n(db.trainer) }
+  end)
+end
+ns.BeforeSave = beforeSave
 
 local function save()
   if settings then settings.savingAt = time() end  -- read back after the reload to confirm the save
@@ -1211,11 +1452,20 @@ end
 ns.Save = save
 
 local f = CreateFrame("Frame")
+local scanTicker
 local handlers = {
   PLAYER_LOGIN = function()
-    init()
+    -- every step on its own: one that fails is counted and the rest still runs
+    if not G.run("init", init) or not db or not settings then
+      db = type(EverlookDBData) == "table" and EverlookDBData or {}
+      EverlookDBData = db
+      pcall(Care.Repair, db)
+      db.format, db.locale, db.since = VERSION, db.locale or GetLocale(), db.since or time()
+      settings = settings or ns.InitSettings(db)
+      paused = settings.paused and true or false
+    end
     noName(nil)  -- remember the player's name for the check (never saved)
-    if ns.BeastsReady then ns.BeastsReady() end
+    if ns.BeastsReady then G.run("init:beasts", ns.BeastsReady) end
     local savingAt = settings.savingAt or db.savingAt  -- older versions kept it in the data
     if savingAt and time() - savingAt < 120 then
       settings.lastSave = savingAt
@@ -1226,8 +1476,17 @@ local handlers = {
       end
     end
     db.savingAt, settings.savingAt = nil, nil
-    C_Timer.NewTicker(1, scanNameplates)
+    scanTicker = scanTicker or C_Timer.NewTicker(1, G.wrap("tick", scanNameplates))
   end,
+  -- after every loading screen: nothing half done from before it stays, and the quest log is looked through
+  PLAYER_ENTERING_WORLD = function()
+    pendingLoot, lootDone, lootSig, moneySources, moneyBefore = nil, false, nil, nil, nil
+    merchantOpen, lastCast, lastObjectName = false, nil, nil
+    ns.PlaceChanged()
+    C_Timer.After(5, G.wrap("timer:questlog", sweepQuestLog))
+  end,
+  ZONE_CHANGED_NEW_AREA = function() ns.PlaceChanged() end,
+  PLAYER_LOGOUT = function() beforeSave() end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
   -- a unit whose GUID was hidden in combat: try once more now that combat is over
   PLAYER_REGEN_ENABLED = function()
@@ -1243,17 +1502,15 @@ local handlers = {
     if unit ~= "player" then return end
     lastCast, lastCastAt = spellName(spellID), GetTime()
   end,
-  LOOT_READY = readLoot,
-  LOOT_OPENED = readLoot,
+  LOOT_READY = function() readLoot() end,
+  LOOT_OPENED = function() readLoot() end,
   LOOT_CLOSED = lootClosed,
   MERCHANT_SHOW = function()
     merchantOpen = true
-    -- uncached items arrive later: read again only when some were missing (0 is true in Lua)
-    local missing = readVendor()
-    if missing and missing > 0 and not paused then C_Timer.After(1.5, readVendor) end
+    vendorOpened()
   end,
   GOSSIP_SHOW = function() readUnit("npc", true) end,
-  TRAINER_SHOW = function() C_Timer.After(0.5, readTrainer) end,   -- the list fills in a moment later
+  TRAINER_SHOW = function() C_Timer.After(0.5, G.wrap("timer:trainer", readTrainer)) end,   -- the list fills in a moment later
   TAXIMAP_OPENED = function() service("taxi") end,
   BANKFRAME_OPENED = function() service("bank") end,
   AUCTION_HOUSE_SHOW = function() service("ah") end,
@@ -1261,12 +1518,19 @@ local handlers = {
   CONFIRM_BINDER = function() service("inn") end,
   CHAT_MSG_COMBAT_XP_GAIN = readKillXP,
   QUEST_DETAIL = questDetail,
-  QUEST_ACCEPTED = function(a, b) questAccepted(b or a) end,  -- (questID) or (logIndex, questID)
+  QUEST_ACCEPTED = function(a, b)  -- (questID) or (logIndex, questID)
+    local qid = num(b) or num(a)
+    if qid then swept[qid] = true end
+    if not paused then tally("quests") end
+    questAccepted(qid)
+  end,
   MERCHANT_CLOSED = function() merchantOpen = false end,
   QUEST_PROGRESS = questProgress,
   QUEST_COMPLETE = questComplete,
   QUEST_TURNED_IN = function(qid, xp, money)
-    if paused or not qid then return end
+    qid = num(qid)
+    if paused or not qid or qid <= 0 then return end
+    tally("handins")
     local q = questRecord(qid)
     q.done = (q.done or 0) + 1
     -- XP and money can be values the game hides from addons: compare them only when they are plain numbers
@@ -1285,10 +1549,14 @@ local handlers = {
   CHAT_MSG_LOOT = lootLine,
   CHAT_MSG_CURRENCY = currencyLine,
 }
-for event in pairs(handlers) do pcall(f.RegisterEvent, f, event) end
+for event in pairs(handlers) do
+  if not pcall(f.RegisterEvent, f, event) then noEvent[#noEvent + 1] = event end
+end
+-- One handler that fails is counted by its event (health.errs, with a sample) and never stops the others.
 f:SetScript("OnEvent", function(_, event, ...)
   if event ~= "PLAYER_LOGIN" and not db then return end
-  handlers[event](...)
+  local okRun, err = pcall(handlers[event], ...)
+  if not okRun then G.note("event:" .. event, err) end
 end)
 
 ---------------------------------------------------------------------------------------------------
@@ -1308,12 +1576,12 @@ function ns.Status()
   local now = GetTime()
   if statusCache and statusAt == now then return statusCache end
   local kills = 0
-  for _, rec in pairs(db.loot) do kills = kills + rec.n end
+  for _, rec in pairs(db.loot) do kills = kills + (type(rec) == "table" and tonumber(rec.n) or 0) end
   local s = {
     npcs = count(db.npc), loot = count(db.loot), looted = kills, objects = count(db.obj),
     vendors = count(db.vendor), trainers = count(db.trainer), quests = count(db.quest),
     beasts = count(db.beast or {}),
-    since = db.since, unsaved = changes, lastSave = settings.lastSave,
+    since = db.since, unsaved = changes, lastSave = settings and settings.lastSave,
   }
   statusCache, statusAt = s, now
   return s

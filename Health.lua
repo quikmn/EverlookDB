@@ -9,7 +9,19 @@
 --   item            "ok", "slow" (not loaded within a few seconds) or "none" (no item API)
 --   missing         core APIs that are not there
 --   errors          API calls that threw an error
---   errs            the same, per API by name ("CheckInteractDistance" = 12), at most 40 names
+--   errs            the same, per API by name ("CheckInteractDistance" = 12), and errors in the addon's own
+--                   handlers by event or timer ("event:LOOT_READY"), at most 40 names (Guard.lua)
+--   log             the last 20 distinct error messages as short samples: no GUID, no quoted text, never your name
+--   notes           counts of things worth seeing that are not errors: lootUnread (loot windows left out of the
+--                   drop counts because an item could not be read), vendorItemsUnread, repaired (damaged entries
+--                   mended at login), localeChanged, compacted, questFromLog
+--   noEvent         game events the client refused to register
+--   Written just before the game saves the file (logout or reload, EverlookDB.lua beforeSave):
+--   gaps            how complete the file is: npcs, noName, noLevel, exact / approx / inst / zoneOnly / noLoc (where
+--                   each NPC is known to be), loot, lootNoName, objs, objNoName, quests, questNoGiver, ... (Care.lua)
+--   rec             the addon's own row counts (npc, loot, looted, obj, vendor, quest, trainer): the site compares
+--                   them with what it could read, so rows lost on the way are noticed
+--   bytes           about the size of the file on disk
 local _, ns = ...
 
 -- APIs the Collector can't do its job without

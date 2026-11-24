@@ -13,6 +13,13 @@ A World of Warcraft: Forever addon that notes what you see while you play, so Ev
 - **Hunters, when you tame a beast:** which beast it was and its level, and what the new pet knows in its first 30 seconds: its abilities, Faster or Slower Attack, attack speed, level, family, training points and diet.
 - **Hunters, when you cast Beast Lore:** the lines Beast Lore adds to the beast's tooltip (abilities, diet, tameable and the like), the beast and its level.
 - With every file: the game's language, the game versions you played on, when the addon started recording, and when you last opened each vendor and trainer. Tames and Beast Lore reads are counted per game version and week, never by day or time of day.
+- A small self-check, so a game update that breaks something is noticed: whether the game's info works (yes or no), how many errors happened and of which kind with a short sample of each error text (never a name), and how complete the file is (how many NPCs have a name and a spot on the map).
+
+## Seeing what was recorded
+
+`/edb status` shows, in plain words, what was recorded lately in each zone or dungeon (NPCs, corpses and nodes looted, quests, vendors), where your NPCs are known to be (a spot on the map, a rough spot, a dungeon, or nowhere yet), and anything that went wrong. Run it right after a dungeon to see that the run was captured. `/edb errors` lists what went wrong, if anything. The list of places is kept with your settings and is never uploaded.
+
+If something does go wrong while recording, the addon keeps going with everything else and says so once in chat (untick it under Options).
 
 ## Quest item sparkles
 
@@ -29,7 +36,8 @@ Your character, realm or account name, other players, chat, your gear or bags, a
 - `/edb`: the window (also under Settings > AddOns)
 - `/edb off` / `/edb on` (or `toggle`): pause and resume recording (`/edb pause` and `/edb resume` still work)
 - `/edb save`: write the data file now (reloads the UI)
-- `/edb status`: version, recording or paused, and what has been recorded so far
+- `/edb status`: version, recording or paused, what was recorded lately place by place, and any problems
+- `/edb errors`: what went wrong while recording, if anything
 - `/edb sparkles off` / `on`: quest item sparkles
 - `/edb savedmessage off`, or `/edb set savedmessage off`: change a setting; `/edb get` lists them
 - `/edb search <words>`: open the window with its search box filled

@@ -1,5 +1,16 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- `/edb status` now shows what was recorded lately in each zone or dungeon (NPCs, loot, quests, vendors), where your NPCs are known to be, and any problems in plain words. Check it right after a dungeon run. The window shows the same.
+- Nothing is lost when the game is slow or hides something: a loot window with an item still loading is read again a moment later, vendor and trainer lists keep what was already known, and quest objectives that had not loaded are filled in from your quest log.
+- One thing going wrong no longer stops the rest. The addon counts what went wrong and by which part (`/edb errors`), and says so once in chat.
+- Creatures you fought but never stood next to get a rough spot on the map.
+- Kill XP is noted even when the game hides the creature's level during the fight.
+- A damaged data file is mended when you log in instead of breaking the addon.
+- If you change the game's language, names are recorded again in the new language and your counts stay.
+- Restart the game after this update (it adds files). Until you do, it keeps recording as before.
+
 ## v0.7.0 (2026-11-24)
 
 - Dungeons: creatures and their loot now note which dungeon they are in, so EverlookDB.com can show them on the dungeon's page. When you loot a corpse, its level and whether it is elite or a boss are noted too.

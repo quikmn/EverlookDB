@@ -33,6 +33,7 @@ C_UI = { Reload = function() MOCK.reloads = MOCK.reloads + 1 end }
 LOOT_ITEM_PUSHED_SELF, LOOT_ITEM_PUSHED_SELF_MULTIPLE = "You receive item: %s.", "You receive item: %sx%d."
 CURRENCY_GAINED, CURRENCY_GAINED_MULTIPLE = "You receive currency: %s.", "You receive currency: %s x%d."
 CURRENCY_GAINED_MULTIPLE_BONUS = "You receive currency: %s x%d. (Bonus Objective)"
+COMBATLOG_XPGAIN_FIRSTPERSON = "%s dies, you gain %d experience."
 
 local globalWrites = {}
 local addonEnv = setmetatable({}, { __index = _G, __newindex = function(_, k, v) globalWrites[k] = true; _G[k] = v end })
@@ -78,7 +79,7 @@ step("pause, resume and status from chat", function()
 	MOCK.log = {}
 	SlashCmdList.EVERLOOKDB("status")
 	check(MOCK.log[1]:find("v0.1.0-test", 1, true) and MOCK.log[1]:find("Recording:", 1, true), "status header: " .. tostring(MOCK.log[1]))
-	check(MOCK.log[2]:find("1 NPCs, 1 loot sources %(3 looted%)") and MOCK.log[3]:find("SavedVariables", 1, true), "status: " .. table.concat(MOCK.log, " / "))
+	check(MOCK.log[2]:find("1 NPCs, 1 loot sources %(3 looted%)") and MOCK.log[#MOCK.log]:find("SavedVariables", 1, true), "status: " .. table.concat(MOCK.log, " / "))
 end)
 
 step("chat commands follow the shared pattern: on/off, get/set, aliases, suggestions", function()
@@ -717,6 +718,7 @@ end)
 step("login drops saved titles that name an owner", function()
 	EverlookDBData.npc[248463] = { name = "Rumbler", title = "Nimsy's Pet" }
 	EverlookDBData.npc[1481] = { name = "Bart Tidewater", title = "Captain of the Maiden's Virtue" }
+	EverlookDBData.schema = 1  -- a file from before that step (Care.lua runs each step once per file)
 	MOCK.Fire("PLAYER_LOGIN")
 	check(EverlookDBData.npc[248463].title == nil, "owner title kept")
 	check(EverlookDBData.npc[1481].title == "Captain of the Maiden's Virtue", "a real title dropped")
@@ -1126,7 +1128,19 @@ step("titles: the \"Level ??\" line of a creature far above you is not a title",
 	unstubAll()
 end)
 
+-- Robustness steps (tests/robust.lua) share this file's helpers
+do
+	local chunk = assert(loadfile(ROOT .. "/tests/robust.lua"))
+	setfenv(chunk, setmetatable({ step = step, check = check, stub = stub, unstubAll = unstubAll, tick = tick,
+		runTimers = runTimers, openLoot = openLoot, nearWorld = nearWorld, dungeonWorld = dungeonWorld,
+		resetTrust = resetTrust, hasText = hasText, ns = ns },
+		{ __index = _G, __newindex = function(_, k, v) _G[k] = v end }))
+	chunk()
+end
+
 step("no Lua errors reported", function()
+	print("health.log at the end:")
+	for _, l in ipairs(EverlookDBData.health.log or {}) do print("    " .. l) end
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)
 

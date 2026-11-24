@@ -8,8 +8,11 @@
 
 Libs\LibStub\LibStub.lua
 Libs\EverlookUI\EverlookUI.lua
+Guard.lua
+Care.lua
 EverlookDB.lua
 Health.lua
 Beasts.lua
 Sparkles.lua
+Report.lua
 Options.lua
