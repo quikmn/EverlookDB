@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.7.0 (2026-11-24)
 
 - Dungeons: creatures and their loot now note which dungeon they are in, so EverlookDB.com can show them on the dungeon's page. When you loot a corpse, its level and whether it is elite or a boss are noted too.
 - No more hidden errors inside dungeons from nameplates the game keeps private.
