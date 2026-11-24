@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.8.0 (2026-11-24)
 
 - `/edb status` now shows what was recorded lately in each zone or dungeon (NPCs, loot, quests, vendors), where your NPCs are known to be, and any problems in plain words. Check it right after a dungeon run. The window shows the same.
 - Nothing is lost when the game is slow or hides something: a loot window with an item still loading is read again a moment later, vendor and trainer lists keep what was already known, and quest objectives that had not loaded are filled in from your quest log.
