@@ -4,8 +4,8 @@ A World of Warcraft: Forever addon that notes what you see while you play, so Ev
 
 ## What it records
 
-- **Loot:** what each mob dropped, what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node is counted once, which is what gives drop rates. Money from a corpse when only one was looted.
-- **NPCs:** name, title, level, type and family, whether they are rare or elite, whether they can be skinned, maximum health per level, how they react to your faction, every zone they are seen in, and where they stand. Positions are only taken when you are within about 10 yards of the NPC, so they are accurate. For beasts, how many spawns were seen at each level.
+- **Loot:** what each mob dropped (and in which dungeon), what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node is counted once, which is what gives drop rates. Money from a corpse when only one was looted.
+- **NPCs:** name, title, level, type and family, whether they are rare or elite, whether they can be skinned, maximum health per level, how they react to your faction, every zone and dungeon they are seen in, and where they stand. Exact positions are only taken when you are within about 10 yards of the NPC; within about 28 yards a rough spot is noted apart from them, only until an exact one is known. Inside dungeons the game hides which creature is which, so a creature's level and whether it is elite or a boss are noted when you loot it. For beasts, how many spawns were seen at each level.
 - **XP:** the XP a kill gave when you play solo (your level and the mob's level), and the XP a quest gave at your level.
 - **Services and trainers:** flight masters, bankers, auctioneers, stable masters, innkeepers and trainers, and what each trainer teaches, for how much and from which level.
 - **Vendors:** what they sell, the price, the stack size and whether stock is limited.

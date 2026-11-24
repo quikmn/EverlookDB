@@ -9,6 +9,7 @@
 --   item            "ok", "slow" (not loaded within a few seconds) or "none" (no item API)
 --   missing         core APIs that are not there
 --   errors          API calls that threw an error
+--   errs            the same, per API by name ("CheckInteractDistance" = 12), at most 40 names
 local _, ns = ...
 
 -- APIs the Collector can't do its job without

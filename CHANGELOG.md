@@ -1,5 +1,12 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Dungeons: creatures and their loot now note which dungeon they are in, so EverlookDB.com can show them on the dungeon's page. When you loot a corpse, its level and whether it is elite or a boss are noted too.
+- No more hidden errors inside dungeons from nameplates the game keeps private.
+- Creatures you pass within about 28 yards get a rough spot on the map when no exact one is known yet.
+- "Level ??" is no longer taken for a creature's title.
+
 ## v0.6.2 (2026-11-22)
 
 - Quest item sparkles: the glitter on quest objects you can loot stays on, even after a graphics preset turns it off. On by default; untick it under Options or type /edb sparkles off.

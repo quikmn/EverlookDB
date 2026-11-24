@@ -990,6 +990,142 @@ step("quest item sparkles: on by default, kept on after a preset, the outline mo
 	check(not hasText(s, "Creature-") and not hasText(s, "Player-"), "a GUID in the settings")
 end)
 
+---------------------------------------------------------------------------------------------------
+-- Dungeons: the game hides which NPC a unit is (secret GUIDs, names and nameplate tokens)
+
+-- In a dungeon: secret nameplate tokens (the game throws when one is passed back), a target whose GUID and name
+-- are hidden, and no zone map. target: { dead, level, class, name (nil = hidden) }
+local function dungeonWorld(target)
+	local function noSecret(name, fn)
+		stub(name, function(u, ...)
+			if MOCK.isSecret(u) then error(name .. ": secret unit token") end
+			return fn(u, ...)
+		end)
+	end
+	local tok = MOCK.Secret("nameplate1")
+	stub("C_NamePlate", { GetNamePlates = function() return { { namePlateUnitToken = tok } } end })
+	stub("GetInstanceInfo", function() return "Krol'dok Stronghold", "party", 1, "Normal", 5, 0, false, 3039 end)
+	stub("C_Map", { GetBestMapForUnit = function() return nil end, GetPlayerMapPosition = function() return nil end })
+	local isT = function(u) return target and (u == "target" or u == "mouseover") end
+	noSecret("CheckInteractDistance", function() return false end)
+	noSecret("UnitExists", function(u) return isT(u) and true or false end)
+	noSecret("UnitIsPlayer", function() return false end)
+	noSecret("UnitPlayerControlled", function() return false end)
+	noSecret("UnitIsDead", function(u) return isT(u) and target.dead or false end)
+	noSecret("UnitGUID", function(u) if isT(u) then return MOCK.Secret("Creature-0-1-2-3-258964-0000AA0001") end end)
+	noSecret("UnitName", function(u) if isT(u) then return target.name or MOCK.Secret("Nar'gurk") end end)
+	noSecret("UnitLevel", function(u) if isT(u) then return target.level end end)
+	noSecret("UnitClassification", function(u) if isT(u) then return target.class end end)
+	noSecret("UnitCreatureType", function(u) if isT(u) then return MOCK.Secret("Humanoid") end end)
+	noSecret("UnitCreatureFamily", function() return nil end)
+	noSecret("UnitHealthMax", function() return 100 end)
+	noSecret("UnitReaction", function() return 2 end)
+end
+
+step("dungeons: secret nameplate tokens and GUIDs throw nothing and save nothing wrong", function()
+	resetTrust()
+	dungeonWorld({ dead = false, level = 36, class = "elite" })
+	local errors = EverlookDBData.health.errors
+	EverlookDBData.npc[258964] = nil
+	tick(5)
+	MOCK.Fire("PLAYER_TARGET_CHANGED")
+	MOCK.Fire("UPDATE_MOUSEOVER_UNIT")
+	MOCK.Fire("PLAYER_REGEN_ENABLED")
+	check(EverlookDBData.health.errors == errors, "an API threw: " .. EverlookDBData.health.errors - errors)
+	check(EverlookDBData.npc[258964] == nil, "a unit we can't tell was saved")
+	unstubAll()
+end)
+
+step("dungeons: a looted corpse gets its dungeon, level and classification; the loot its dungeon", function()
+	resetTrust()
+	dungeonWorld({ dead = true, level = 37, class = "elite" })
+	EverlookDBData.npc[258964], EverlookDBData.loot["u:258964"], EverlookDBData.inst = nil, nil, nil
+	openLoot({ ["Creature-0-1-2-3-258964-0000AA0001"] = { 275006, 267104 } })
+	local n, l = EverlookDBData.npc[258964], EverlookDBData.loot["u:258964"]
+	check(n and n.zi and n.zi[3039] == 1, "the NPC's dungeon")
+	check(n.lo == 37 and n.hi == 37 and n.class == "elite" and n.name == nil and n.type == nil, "level / class / hidden name: "
+		.. tostring(n.lo) .. " " .. tostring(n.class) .. " " .. tostring(n.name))
+	check(n.p and n.p[3039] and n.p[3039].n == 1, "the sighting in the dungeon")
+	check(l and l.n == 1 and l.i[275006] and l.zi and l.zi[3039] == 1, "the loot's dungeon")
+	local i = EverlookDBData.inst and EverlookDBData.inst[3039]
+	check(i and i.name == "Krol'dok Stronghold" and i.type == "party" and i.d[1] == 1, "the dungeon's name and kind")
+	-- a boss (level -1) with a readable name
+	unstubAll()
+	dungeonWorld({ dead = true, level = -1, class = "elite", name = "Nar'gurk" })
+	MOCK.time = MOCK.time + 60
+	openLoot({ ["Creature-0-1-2-3-258964-0000AA0002"] = { 275006 } })
+	check(n.boss == 1 and n.name == "Nar'gurk" and n.lo == 37 and l.n == 2 and l.zi[3039] == 2, "the boss: " .. tostring(n.boss))
+	unstubAll()
+end)
+
+step("dungeons: a dead unit that isn't the corpse, or two corpses at once, give nothing", function()
+	resetTrust()
+	-- the dead target's name is another NPC's: it is not this corpse
+	dungeonWorld({ dead = true, level = 30, class = "normal", name = "Someone Else" })
+	EverlookDBData.npc[262065] = { name = "Krol'dok Brute" }
+	openLoot({ ["Creature-0-1-2-3-262065-0000AA0003"] = { 2589 } })
+	local n = EverlookDBData.npc[262065]
+	check(n.lo == nil and n.class == nil and n.name == "Krol'dok Brute" and n.zi[3039] == 1, "another unit's level taken")
+	-- two corpses in one loot window (area loot): no unit to tie them to
+	unstubAll()
+	dungeonWorld({ dead = true, level = 30, class = "normal" })
+	EverlookDBData.npc[262066], EverlookDBData.npc[262067] = nil, nil
+	MOCK.time = MOCK.time + 60
+	openLoot({ ["Creature-0-1-2-3-262066-0000AA0004"] = { 2589 }, ["Creature-0-1-2-3-262067-0000AA0005"] = { 2592 } })
+	check(EverlookDBData.npc[262066].lo == nil and EverlookDBData.npc[262067].lo == nil, "area loot took a level")
+	check(EverlookDBData.npc[262066].zi[3039] == 1 and EverlookDBData.npc[262067].zi[3039] == 1, "dungeon lost in area loot")
+	-- a living target is not a corpse
+	unstubAll()
+	dungeonWorld({ dead = false, level = 30, class = "normal" })
+	EverlookDBData.npc[262068] = nil
+	MOCK.time = MOCK.time + 60
+	openLoot({ ["Creature-0-1-2-3-262068-0000AA0006"] = { 2589 } })
+	check(EverlookDBData.npc[262068].lo == nil, "a living unit's level taken")
+	unstubAll()
+end)
+
+step("positions: within about 28 yards only an approximate spot, kept apart from exact ones", function()
+	resetTrust()
+	nearWorld({ "Creature-0-1-2-3-4001-0000AB0001" })
+	stub("CheckInteractDistance", function(_, i) return i == 4 end)
+	EverlookDBData.npc[4001] = nil
+	tick(5)
+	local n = EverlookDBData.npc[4001]
+	check(n and n.pa and n.pa[1429] and n.pa[1429]["400:600"] == 1, "approximate spot: " .. tostring(n and n.pa))
+	check(n.p == nil, "an approximate spot saved as exact")
+	-- once an exact spot is known on this map, no more approximate ones there
+	stub("CheckInteractDistance", function() return true end)
+	tick(1)
+	check(n.p[1429]["400:600"] == 1, "exact spot")
+	unstubAll()
+	n.pa = nil
+	nearWorld({ "Creature-0-1-2-3-4001-0000AB0002" })
+	stub("CheckInteractDistance", function(_, i) return i == 4 end)
+	tick(3)
+	check(n.pa == nil, "approximate spot next to an exact one")
+	unstubAll()
+end)
+
+step("health: an API that throws is counted by its name, never more than that", function()
+	local h = EverlookDBData.health
+	h.errs = nil
+	nearWorld({ "Creature-0-1-2-3-4002-0000AB0003" })
+	stub("CheckInteractDistance", function() error("blocked") end)
+	tick(2)
+	check(h.errs and h.errs.CheckInteractDistance and h.errs.CheckInteractDistance >= 2, "error not named")
+	for k in pairs(h.errs) do check(type(k) == "string" and #k < 60, "a strange error name") end
+	unstubAll()
+end)
+
+step("titles: the \"Level ??\" line of a creature far above you is not a title", function()
+	nearWorld({ "Creature-0-1-2-3-7032-0000AB0009" })
+	stub("C_TooltipInfo", { GetUnit = function() return { lines = { { leftText = "Greater Obsidian Elemental" }, { leftText = "Level ??" } } } end })
+	EverlookDBData.npc[7032] = nil
+	tick(1)
+	check(EverlookDBData.npc[7032] and EverlookDBData.npc[7032].title == nil, "title: " .. tostring(EverlookDBData.npc[7032] and EverlookDBData.npc[7032].title))
+	unstubAll()
+end)
+
 step("no Lua errors reported", function()
 	check(#MOCK.errors == 0, table.concat(MOCK.errors, "\n"))
 end)

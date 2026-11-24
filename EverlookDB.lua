@@ -1,7 +1,9 @@
 -- EverlookDB: notes what you see while you play, for EverlookDB.com.
 --   loot     what each mob, skinned mob, pickpocketed mob, herb, ore vein, chest and fishing spot gave
 --   npcs     name, level, type, rare/elite, skinnable, max health, the zones they are in, where they stand (only
---            when you are next to them), the XP a solo kill gave, and services (flight master, banker, trainer, ...)
+--            when you are next to them; within about 28 yards as approximate spots), the dungeon they are in, the XP a
+--            solo kill gave, and services (flight master, banker, trainer, ...)
+--   inst     each dungeon or raid entered: its name, kind and difficulties (EverlookDB.com's dungeon pages use its map ID)
 --   trainers what each trainer teaches, for how much, from which level
 --   vendors  what each vendor sells, for how much, and whether stock is limited
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
@@ -18,6 +20,7 @@ local VERSION = 1
 local SPAWN_GRID = 5        -- positions are kept on a 0.5% grid of the zone map
 local SPAWNS_PER_MAP = 150  -- most grid cells kept per NPC or node per map
 local NEAR = 3              -- CheckInteractDistance index: about 10 yards
+local CLOSE = 4             -- CheckInteractDistance index: about 28 yards (approximate spots, rec.pa)
 
 local db
 local settings              -- EverlookDBSettings
@@ -59,11 +62,41 @@ local function num(v)
   return type(v) == "number" and v or nil
 end
 local function pack(...) return { n = select("#", ...), ... } end  -- WoW runs Lua 5.1: no table.pack
+
+-- The API a function is, by name, for the self-test's error counts: only these words are ever saved.
+local API_NAMES = {
+  "CheckInteractDistance", "C_Map.GetBestMapForUnit", "C_Map.GetPlayerMapPosition", "GetInstanceInfo",
+  "C_TooltipInfo.GetUnit", "C_TooltipInfo.GetTrainerService", "GetLootSourceInfo", "IsFishingLoot",
+  "UnitExists", "UnitGUID", "UnitName", "UnitLevel", "UnitIsDead", "UnitClassification",
+  "C_CurrencyInfo.GetCurrencyListSize", "C_CurrencyInfo.GetCurrencyListInfo", "C_CurrencyInfo.GetCurrencyListLink",
+  "GetQuestItemInfo", "GetQuestItemLink", "GetNumRewardCurrencies", "C_QuestOffer.GetQuestRewardCurrencyInfo",
+  "GetQuestCurrencyID", "GetQuestCurrencyInfo", "GetNumQuestRewards", "GetNumQuestChoices", "GetRewardMoney",
+  "C_QuestLog.GetLogIndexForQuestID", "C_QuestLog.GetInfo", "C_QuestLog.GetQuestObjectives", "GetNumQuestItems",
+  "GetNumTrainerServices", "GetTrainerServiceInfo", "GetTrainerServiceCost", "GetTrainerServiceLevelReq",
+  "C_Spell.GetSpellName", "GetSpellInfo", "GetBuildInfo", "GetRealmName", "C_Item.GetItemInfo", "GetItemInfo",
+  "C_SpellBook.HasPetSpells", "C_PetInfo.GetPetTrainingPoints", "C_PetInfo.GetPetFoodTypes", "UnitAttackSpeed",
+  "UnitCreatureFamily", "GameTooltip.GetOwner", "GameTooltip.GetUnit", "GameTooltip.GetItem",
+}
+local function apiName(f)
+  for _, path in ipairs(API_NAMES) do
+    local t = _G
+    for part in path:gmatch("[^.]+") do t = type(t) == "table" and t[part] or nil end
+    if t == f then return path end
+  end
+  return "other"
+end
+local MAX_ERROR_NAMES = 40
 local function safe(f, ...)
   local r = pack(pcall(f, ...))
   if not r[1] then
-    local h = ns.health  -- the self-test counts calls that threw (Health.lua)
-    if h then h.errors = math.min((h.errors or 0) + 1, 1000000) end
+    local h = ns.health  -- the self-test counts calls that threw (Health.lua), and which API threw
+    if h then
+      h.errors = math.min((h.errors or 0) + 1, 1000000)
+      h.errs = type(h.errs) == "table" and h.errs or {}
+      local name, n = apiName(f), 0
+      if not h.errs[name] then for _ in pairs(h.errs) do n = n + 1 end end
+      if h.errs[name] or n < MAX_ERROR_NAMES then h.errs[name] = math.min((h.errs[name] or 0) + 1, 1000000) end
+    end
     return nil
   end
   for i = 2, r.n do r[i] = ok(r[i]) end
@@ -121,9 +154,38 @@ local function where()
   return map
 end
 
+-- Inside a dungeon or raid: its map ID (the one EverlookDB.com files dungeon pages under) and difficulty. The first
+-- time a session, the instance's name and kind are noted in db.inst, so the site can tell which place it is.
+local instNoted = {}
 local function instanceMap()
-  local _, itype, difficulty, _, _, _, _, mapID = safe(GetInstanceInfo)
-  if itype and itype ~= "none" then return mapID, difficulty end
+  local name, itype, difficulty, _, _, _, _, mapID = safe(GetInstanceInfo)
+  mapID = num(mapID)
+  if not (itype and itype ~= "none" and mapID and mapID > 0) then return nil end
+  difficulty = num(difficulty)
+  local key = mapID .. ":" .. tostring(difficulty)
+  if db and not instNoted[key] then
+    instNoted[key] = true
+    db.inst = db.inst or {}
+    local i = db.inst[mapID] or {}
+    db.inst[mapID] = i
+    if type(name) == "string" and name ~= "" then i.name = name end
+    if type(itype) == "string" then i.type = itype end           -- party, raid, pvp, arena, scenario
+    if difficulty then i.d = i.d or {}; i.d[difficulty] = 1 end
+  end
+  return mapID, difficulty
+end
+
+-- seen in that instance: rec.zi = { [instance map ID] = 1 }
+local function seenIn(rec, inst)
+  if not inst then return end
+  rec.zi = rec.zi or {}
+  if not rec.zi[inst] then rec.zi[inst] = 1; changes = changes + 1 end
+end
+
+-- A unit token we may hand to the game. Inside dungeons, nameplate and world-cursor tokens can be secret values,
+-- and the game throws when an addon passes one back to it.
+local function usable(unit)
+  return type(unit) == "string" and not isSecret(unit)
 end
 
 -- A set of keys seen this session that never grows past about 2 * limit: when the newest half fills up, the
@@ -243,15 +305,21 @@ local spotCounted = seenSet(5000)
 local spotRecent = recentSet(5000, 300, true)
 
 -- add a position to rec.p[map] as a grid cell "x:y" -> times seen (each spawn once a session when guid is given)
-local function addSpot(rec, map, x, y, guid, id)
+-- field: "p" (default) or "pa", approximate spots (within about 28 yards), counted apart from the exact ones
+local approxCounted = seenSet(5000)
+local approxRecent = recentSet(5000, 300, true)
+local function addSpot(rec, map, x, y, guid, id, field)
   if not map then return end
+  field = field or "p"
   if guid then
     local fallback = (id or 0) .. "@" .. map .. ":" .. cell(x, y, SPAWN_GRID)
-    if not firstSight(spotCounted, spotRecent, guid, fallback) then return end
+    if field == "pa" then
+      if not firstSight(approxCounted, approxRecent, guid, fallback) then return end
+    elseif not firstSight(spotCounted, spotRecent, guid, fallback) then return end
   end
-  rec.p = rec.p or {}
-  local cells = rec.p[map]
-  if not cells then cells = { n = 0 }; rec.p[map] = cells end
+  rec[field] = rec[field] or {}
+  local cells = rec[field][map]
+  if not cells then cells = { n = 0 }; rec[field][map] = cells end
   if not x then cells.n = cells.n + 1; changes = changes + 1; return end  -- seen on this map, position unknown (instance)
   local key = math.floor(x / SPAWN_GRID) * SPAWN_GRID .. ":" .. math.floor(y / SPAWN_GRID) * SPAWN_GRID
   if cells[key] then
@@ -262,6 +330,14 @@ local function addSpot(rec, map, x, y, guid, id)
     cells.n = cells.n + 1
     changes = changes + 1
   end
+end
+
+-- rec.p[map] holds at least one position (not just sightings without one)
+local function hasCells(p, map)
+  local cells = type(p) == "table" and p[map]
+  if type(cells) ~= "table" then return false end
+  for k in pairs(cells) do if k ~= "n" then return true end end
+  return false
 end
 
 -- Versions before 0.4.2 added 1 to an NPC's spot every second you stood next to it (one cell reached 408),
@@ -330,14 +406,23 @@ local function ownerTitle(text)
 end
 ns.OwnerTitle = ownerTitle
 
+-- "Level ??" (a creature far above you) is the level line, not a title
+local LEVEL_WORD = type(LEVEL) == "string" and LEVEL ~= "" and LEVEL or "Level"
+local function isLevelLine(text) return text:sub(1, #LEVEL_WORD) == LEVEL_WORD end
+
 -- here: { map, x, y } from where(), when the caller already has it (the nameplate scan reads it once a tick)
+-- near: true within about 10 yards (an exact spot), "close" within about 28 (an approximate spot, rec.pa)
+local idHidden = false  -- the last unit read had a hidden GUID (dungeons): read it again after combat
 local function readUnit(unit, near, here)
-  if paused or not ok(UnitExists(unit)) or ok(UnitIsPlayer(unit)) then return end
+  if paused or not usable(unit) then return end
+  if not ok(UnitExists(unit)) or ok(UnitIsPlayer(unit)) then return end
   if ok(UnitPlayerControlled(unit)) then return end  -- pets and guardians
   -- companions and other players' pets carry a name and an owner line that a player chose or is
   if UnitIsBattlePetCompanion and ok(UnitIsBattlePetCompanion(unit)) then return end
   if UnitIsOtherPlayersPet and ok(UnitIsOtherPlayersPet(unit)) then return end
-  local guid = ok(UnitGUID(unit))
+  local rawGUID = UnitGUID(unit)
+  if isSecret(rawGUID) then idHidden = true; return end  -- which NPC it is stays hidden (dungeons): see readLoot
+  local guid = ok(rawGUID)
   local kind, id = parseGUID(guid)
   if kind ~= "u" then
     -- a creature GUID of a shape we don't know: record nothing, but count it for the self-test
@@ -372,6 +457,8 @@ local function readUnit(unit, near, here)
     rec.z = rec.z or {}
     if not rec.z[zone] then rec.z[zone] = 1; changes = changes + 1 end
   end
+  local inst = instanceMap()
+  seenIn(rec, inst)  -- inside a dungeon: the dungeon (most give no zone map)
   rec.class = ok(UnitClassification(unit)) or rec.class      -- normal, elite, rare, rareelite, worldboss
   rec.type = ok(UnitCreatureType(unit)) or rec.type          -- Beast, Humanoid, ... (client language)
   rec.family = ok(UnitCreatureFamily(unit)) or rec.family    -- Wolf, Spider, ...
@@ -399,23 +486,29 @@ local function readUnit(unit, near, here)
         if text then
           if SKINNABLE[text] then rec.skin = SKINNABLE[text] end
           -- line 2 is the title ("<Weapon Merchant>") when it isn't the level line
-          if i == 2 and not text:find("%d") and text ~= rec.name and not ownerTitle(text) and noName(text) then rec.title = text end
+          if i == 2 and not text:find("%d") and not isLevelLine(text) and text ~= rec.name and not ownerTitle(text) and noName(text) then rec.title = text end
         end
       end
     end
   end
-  if near and guid then
+  if near == true and guid then
     local map, x, y = here[1], here[2], here[3]
-    if not x then map = instanceMap() or map end
+    if not x then map = inst or map end
     addSpot(rec, map, x, y, guid, id)
+  elseif near == "close" and guid and here[2] and not hasCells(rec.p, here[1]) then
+    -- no exact spot on this map yet: the player's spot within about 28 yards, kept apart as approximate
+    addSpot(rec, here[1], here[2], here[3], guid, id, "pa")
   end
   return rec, id
 end
 
--- Is the unit close enough that the player's position is a good stand-in for its position?
+-- Is the unit close enough that the player's position is a good stand-in for its position? true within about
+-- 10 yards, "close" within about 28, else false. Never in combat (the game restricts it there).
 local function isNear(unit)
-  if InCombatLockdown() then return false end
-  return safe(CheckInteractDistance, unit, NEAR) == true
+  if not usable(unit) or InCombatLockdown() then return false end
+  if safe(CheckInteractDistance, unit, NEAR) == true then return true end
+  if safe(CheckInteractDistance, unit, CLOSE) == true then return "close" end
+  return false
 end
 
 local function scanNameplates()
@@ -428,8 +521,9 @@ local function scanNameplates()
   end
   local here  -- the player's position, read once a tick and only when there are plates
   for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
-    local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
-    if unit then
+    local unit = plate.namePlateUnitToken
+    if not isSecret(unit) and unit == nil then unit = plate.UnitFrame and plate.UnitFrame.unit end
+    if usable(unit) then  -- dungeon nameplates hand out secret tokens: those are skipped
       here = here or { where() }
       readUnit(unit, isNear(unit), here)
     end
@@ -470,6 +564,43 @@ local function lootRecord(key)
   local rec = db.loot[key]
   if not rec then rec = { n = 0, i = {} }; db.loot[key] = rec end
   return rec
+end
+
+-- Inside dungeons the game hides which NPC a unit is (its GUID and often its name), but the loot window still
+-- names the corpse. With one corpse in the window, the dead creature under the cursor (else the target) is that
+-- corpse: its level and classification are noted for it. A readable name that differs from the one saved for
+-- that NPC means it is another unit, and nothing is taken.
+local function corpseUnit(guid)
+  for _, u in ipairs({ "mouseover", "target" }) do
+    if ok(UnitExists(u)) and ok(UnitIsDead(u)) and not ok(UnitIsPlayer(u)) and not ok(UnitPlayerControlled(u)) then
+      local g = UnitGUID(u)
+      if isSecret(g) or g == nil then return u, true end
+      if ns.SameUnit(g, guid) then return u, false end
+    end
+  end
+end
+
+local function readCorpse(id, guid)
+  local u, hidden = corpseUnit(guid)
+  if not u then return end
+  if not hidden then return readUnit(u, false) end  -- a unit we can tell: read it the usual way
+  local rec = npcRecord(id)
+  local name = ok(UnitName(u))
+  if type(name) ~= "string" or name == "" then name = nil end
+  if name and rec.name and rec.name ~= name then return end
+  rec.name = rec.name or name
+  local lvl = num(UnitLevel(u))
+  if lvl then
+    if lvl < 0 then rec.boss = 1
+    elseif lvl > 0 then
+      rec.lo = math.min(rec.lo or lvl, lvl)
+      rec.hi = math.max(rec.hi or lvl, lvl)
+    end
+  end
+  rec.class = ok(UnitClassification(u)) or rec.class
+  rec.type = ok(UnitCreatureType(u)) or rec.type
+  rec.family = ok(UnitCreatureFamily(u)) or rec.family
+  changes = changes + 1
 end
 
 local function readLoot()
@@ -537,9 +668,13 @@ local function readLoot()
           rec.i[item] = it
         end
         moneySources[#moneySources + 1] = rec
+        if inst then rec.zi = rec.zi or {}; rec.zi[inst] = (rec.zi[inst] or 0) + 1 end  -- looted in that dungeon
         -- where it was: corpses mark NPC spawns, objects mark node spawns
         if sk == "u" then
-          addSpot(npcRecord(id), x and map or inst or map, x, y, guid, id)  -- not again when it was counted alive
+          local npc = npcRecord(id)
+          seenIn(npc, inst)
+          if inst and #order == 1 then readCorpse(id, guid) end
+          addSpot(npc, x and map or inst or map, x, y, guid, id)  -- not again when it was counted alive
         else
           local obj = db.obj[id]
           if not obj then obj = {}; db.obj[id] = obj end
@@ -547,6 +682,7 @@ local function readLoot()
           if lastObjectName and GetTime() - lastObjectAt < 15 then obj.name = lastObjectName end
           lastObjectName = nil
           obj.kind = kind
+          seenIn(obj, inst)
           addSpot(obj, x and map or inst or map, x, y)
         end
       end
@@ -1028,7 +1164,9 @@ local function init()
   normalizeSpots(db)
   -- titles that name an owner ("Nimsy's Guardian") saved before 0.2.0 could name a player: drop them
   for _, rec in pairs(db.npc) do
-    if type(rec) == "table" and type(rec.title) == "string" and ownerTitle(rec.title) then rec.title = nil end
+    if type(rec) == "table" and type(rec.title) == "string" and (ownerTitle(rec.title) or isLevelLine(rec.title)) then
+      rec.title = nil  -- ("Level ??" was taken for a title before 0.7.0)
+    end
   end
   fixVendorCosts(db)
   settings = ns.InitSettings(db)
@@ -1091,6 +1229,13 @@ local handlers = {
     C_Timer.NewTicker(1, scanNameplates)
   end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
+  -- a unit whose GUID was hidden in combat: try once more now that combat is over
+  PLAYER_REGEN_ENABLED = function()
+    if not idHidden then return end
+    idHidden = false
+    readUnit("target", isNear("target"))
+    readUnit("mouseover", isNear("mouseover"))
+  end,
   PLAYER_TARGET_CHANGED = function() ns.ForgetToken("target"); readUnit("target", isNear("target")) end,
   NAME_PLATE_UNIT_ADDED = ns.ForgetToken,
   NAME_PLATE_UNIT_REMOVED = ns.ForgetToken,
