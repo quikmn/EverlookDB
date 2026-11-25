@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.9.0 (2026-11-26)
 
 - Dungeon loot: `/edb loot` shows what drops where in every WoW Forever dungeon and raid, boss by boss and the trash mobs, with how often it drops. Search all loot at once (`/edb loot vancleef`), show only what your class can use, one armor type or one slot, and see a tick on what you already have. Shift-click links an item, Ctrl-click tries it on. Opened inside a dungeon, it starts there. Also under Dungeon loot in `/edb`.
 - Item tooltips say which bosses drop the item and how often. Untick it under Dungeon loot if you'd rather not.
