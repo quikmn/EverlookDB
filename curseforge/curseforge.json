@@ -4,6 +4,7 @@
   "slug": "everlookdb-collector",
   "releaseType": "release",
   "relations": [],
+  "screenshots": "screenshots",
   "syncOnRelease": false,
   "categories": {
     "primary": "Quests & Leveling",
