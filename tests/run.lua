@@ -158,6 +158,25 @@ step("window: bare /edb toggles it; every section builds; pause button; Escape c
 	check(not f:IsShown(), "toggle")
 end)
 
+step("status page: Lately shows whole place lines (wrapped notes, never cut off in a value column)", function()
+	local t = time()
+	local saved = EverlookDBSettings.recent
+	EverlookDBSettings.recent = { { k = "zElwynn Forest", name = "Elwynn Forest", from = t - 60, to = t,
+		c = { loot = 3, items = 5, kills = 4, quests = 2, handins = 1, vendors = 1 }, ids = {}, nids = 0 } }
+	ns.app:Open("status")
+	ns.app:Refresh()
+	local line = ns.RecentLines()[1]
+	check(line and #line > 60, "a long place line: " .. tostring(line))
+	local found
+	for _, w in ipairs(ns.app.sections.status.stack.widgets) do
+		if w.text and w.text:GetText() == line then found = w end
+		check(not (w.value and w.value:GetText() == line), "a place line sits in a one-line value column")
+	end
+	check(found, "no wrapped note holds the place line")
+	EverlookDBSettings.recent = saved
+	ns.app:Close()
+end)
+
 step("privacy: the data file holds no settings and no window position", function()
 	ns.app:Open()
 	EverlookDBOptionsWindow:GetScript("OnDragStop")(EverlookDBOptionsWindow)

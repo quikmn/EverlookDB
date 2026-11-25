@@ -99,21 +99,21 @@ app:Section("status", "Status", function(stack)
   UI.Stat(stack, "Collecting since", function() local t = ns.Status().since; return t and date("%Y-%m-%d", t) or "-" end)
 
   UI.Header(stack, "Lately", "What was recorded where, newest first. /edb status shows the same in chat.")
-  for i = 1, 4 do
-    UI.Stat(stack, i == 1 and "Recorded lately" or "", function()
-      local l = ns.RecentLines()[i]
-      return l or (i == 1 and "nothing since you logged in yet" or "")
-    end)
-  end
-  UI.Stat(stack, "Where the NPCs are", function()
-    local _, g = ns.CoverageLine()
-    if not g then return "-" end
-    return ("%d on the map, %d roughly, %d in dungeons, %d only by zone, %d nowhere yet"):format(g.exact, g.approx, g.inst, g.zoneOnly, g.noLoc)
+  -- whole lines that wrap: a place's line is far longer than a value column
+  UI.Note(stack, function()
+    local l = ns.RecentLines()
+    if #l == 0 then return "Nothing recorded since you logged in yet." end
+    return table.concat(l, "\n\n")
   end)
-  UI.Stat(stack, "Problems", function()
+  UI.Note(stack, function()
+    local _, g = ns.CoverageLine()
+    if not g then return "" end
+    return ("|cffe6e8eeWhere the NPCs are|r: %d on the map, %d roughly, %d in dungeons, %d only by zone, %d nowhere yet."):format(g.exact, g.approx, g.inst, g.zoneOnly, g.noLoc)
+  end)
+  UI.Note(stack, function()
     local p = ns.Problems()
-    if #p == 0 then return "|cff62cf88none|r" end
-    return "|cffef5d5d" .. #p .. "|r: " .. p[1] .. (#p > 1 and "  (/edb status lists them all)" or "")
+    if #p == 0 then return "|cffe6e8eeProblems|r: |cff62cf88none|r" end
+    return "|cffe6e8eeProblems|r: |cffef5d5d" .. #p .. "|r  " .. table.concat(p, "\n")
   end)
 
   UI.Header(stack, "Saving and uploading", "The game writes the data file only when you log out or reload.")
