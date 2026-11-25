@@ -31,12 +31,14 @@ MOCK.log = {}
 SlashCmdList.EVERLOOKDB("status")
 SlashCmdList.EVERLOOKDB("errors")
 SlashCmdList.EVERLOOKDB("")
+SlashCmdList.EVERLOOKDB("loot")
 print = realPrint
 local out = table.concat(MOCK.log, "\n")
 local failures = {}
 if not (EverlookDBData.loot["u:6"] and EverlookDBData.loot["u:6"].n == 1) then failures[#failures + 1] = "loot not recorded without the new files" end
 if EverlookDBData.npc[1].name ~= "Kobold" then failures[#failures + 1] = "data lost" end
 if not out:find("Restart the game to finish the update", 1, true) then failures[#failures + 1] = "status doesn't ask for a restart: " .. out end
+if not out:find("dungeon loot comes with it", 1, true) then failures[#failures + 1] = "/edb loot doesn't ask for a restart" end
 if #MOCK.errors > 0 then failures[#failures + 1] = table.concat(MOCK.errors, "\n") end
 print(#failures == 0 and "  ok   updated without a restart: it keeps recording and says to restart" or ("  FAIL updated without a restart\n         " .. table.concat(failures, "\n         ")))
 return #failures

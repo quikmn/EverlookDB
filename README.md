@@ -1,6 +1,14 @@
 # EverlookDB
 
-A World of Warcraft: Forever addon that notes what you see while you play, so EverlookDB.com can show where things are and what drops from what. It runs quietly in the background; there is nothing to set up. `/edb` opens its window: what's recorded so far, saving and uploading, privacy and a few options.
+A World of Warcraft: Forever addon that notes what you see while you play, so EverlookDB.com can show where things are and what drops from what. It runs quietly in the background; there is nothing to set up. `/edb` opens its window: what's recorded so far, saving and uploading, privacy and a few options. `/edb loot` shows what drops where in every dungeon and raid.
+
+## Dungeon loot
+
+`/edb loot` opens a loot browser for every dungeon and raid in WoW Forever. Pick a dungeon, then a boss or its trash mobs, and see what drops and how often: the item's icon, quality, slot, armor type and item level, with its tooltip. Search all loot at once (`/edb loot vancleef` works too), and show only what your class can use, one armor type or one slot. A tick marks what you already have (worn, in your bags, or in your bank once you have opened it). Shift-click links an item in chat, Ctrl-click tries it on. Opened inside a dungeon, it starts on that dungeon.
+
+Item tooltips everywhere also say which bosses drop the item and how often (untick **Show where an item drops in its tooltip** under Dungeon loot to turn that off).
+
+Drop chances come from what players looted in WoW Forever, the Collector's own uploads first. A `~` marks an estimate that hasn't been measured in WoW Forever yet, and `2 of 9` means too few kills to give a chance. The list grows with every upload. Data from ForeverDB.net (https://foreverdb.net).
 
 ## What it records
 
@@ -34,6 +42,7 @@ Your character, realm or account name, other players, chat, your gear or bags, a
 `/edb` (also `/everlookdb`) follows the same pattern as every EverlookDB addon:
 
 - `/edb`: the window (also under Settings > AddOns)
+- `/edb loot`: the dungeon loot browser; `/edb loot <words>` searches all loot
 - `/edb off` / `/edb on` (or `toggle`): pause and resume recording (`/edb pause` and `/edb resume` still work)
 - `/edb save`: write the data file now (reloads the UI)
 - `/edb status`: version, recording or paused, what was recorded lately place by place, and any problems

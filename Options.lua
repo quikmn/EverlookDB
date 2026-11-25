@@ -65,6 +65,11 @@ end)
 app:Command("errors", "errors", "what went wrong while recording, if anything", function()
   for _, l in ipairs(ns.ErrorLines()) do app:Print(l) end
 end)
+-- the dungeon loot browser lives in Loot.lua; a /reload after an update that added it doesn't load it yet
+app:Command("loot", "loot [words]", "dungeon loot: what drops where; with words, it searches all loot", function(rest)
+  if ns.Loot then ns.Loot.Command(rest) return end
+  app:Print("restart the game to finish the update: dungeon loot comes with it.")
+end, { "dungeons", "drops" })
 app:Command("save", "save", "write the data file now (reloads the UI)", function() ns.Save() end)
 app:Command("pause", "pause", "stop recording", function() SetPaused(true) end).hidden = true
 app:Command("resume", "resume", "record again", function() SetPaused(false) end).hidden = true
@@ -154,7 +159,7 @@ app:Section("options", "Options", function(stack)
   app:Widget(stack, "sparkles")
   UI.Note(stack, "It switches the unit outline off (Graphics > Outline Mode), because the game only shows the glitter without it. Turning this off gives your outline mode back; restart the game if the glitter stays.")
   UI.Header(stack, "Chat commands")
-  UI.Note(stack, "/edb  this window\n/edb off, /edb on  pause or resume recording\n/edb sparkles off  stop keeping quest item sparkles on\n/edb save  write the data file now (reloads the UI)\n/edb status  what's recorded, in chat\n/edb savedmessage off  change a setting (/edb get lists them)\n/edb search <words>  find a setting\n/edb feedback  a link for bugs and ideas\n/edb help  all of this in chat")
+  UI.Note(stack, "/edb  this window\n/edb loot  dungeon loot: what drops where\n/edb off, /edb on  pause or resume recording\n/edb sparkles off  stop keeping quest item sparkles on\n/edb save  write the data file now (reloads the UI)\n/edb status  what's recorded, in chat\n/edb savedmessage off  change a setting (/edb get lists them)\n/edb search <words>  find a setting\n/edb feedback  a link for bugs and ideas\n/edb help  all of this in chat")
 end)
 
 -- /edb, also /everlookdb. Before PLAYER_LOGIN there is nothing to show yet.

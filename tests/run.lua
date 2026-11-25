@@ -1138,6 +1138,14 @@ do
 	chunk()
 end
 
+-- The dungeon loot browser (tests/loot.lua)
+do
+	local chunk = assert(loadfile(ROOT .. "/tests/loot.lua"))
+	setfenv(chunk, setmetatable({ step = step, check = check, stub = stub, unstubAll = unstubAll, ns = ns },
+		{ __index = _G, __newindex = function(_, k, v) _G[k] = v end }))
+	chunk()
+end
+
 step("no Lua errors reported", function()
 	print("health.log at the end:")
 	for _, l in ipairs(EverlookDBData.health.log or {}) do print("    " .. l) end

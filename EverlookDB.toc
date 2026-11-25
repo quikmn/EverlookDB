@@ -16,3 +16,5 @@ Beasts.lua
 Sparkles.lua
 Report.lua
 Options.lua
+LootData.lua
+Loot.lua
