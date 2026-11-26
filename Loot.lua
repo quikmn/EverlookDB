@@ -336,8 +336,8 @@ end
 -- The window
 ------------------------------------------------------------------------
 local T = app.T or UI.MakeTheme({ 1.0, 0.824, 0.0 })
-local W, H = 860, 560
-local LEFT_W, MID_W, ROW_H = 210, 200, 36
+local W, H = 970, 560
+local LEFT_W, MID_W, ROW_H, SEARCH_ROW_H = 260, 255, 36, 50
 local win
 local state -- EverlookDBSettings.loot
 
@@ -385,6 +385,8 @@ local function List(parent)
       r.text:SetWordWrap(false)
       r.sub = UI.Text(r, T.fontSmall, T.muted)
       r.sub:SetWordWrap(false)
+      r.where = UI.Text(r, T.fontSmall, T.muted)
+      r.where:SetWordWrap(false)
       r.right = UI.Text(r, T.fontSmall, T.muted)
       r.right:SetJustifyH("RIGHT")
       r.right:SetWordWrap(false)
@@ -412,8 +414,8 @@ local function List(parent)
     self.y = self.y + h
     r.onEnter, r.onClick, r.selected, r.header = nil, nil, false, nil
     r.hl:Hide(); r.bar:Hide(); r.icon:Hide(); r.have:Hide()
-    r.text:ClearAllPoints(); r.sub:ClearAllPoints(); r.right:ClearAllPoints()
-    r.text:SetText(""); r.sub:SetText(""); r.right:SetText("")
+    r.text:ClearAllPoints(); r.sub:ClearAllPoints(); r.right:ClearAllPoints(); r.where:ClearAllPoints()
+    r.text:SetText(""); r.sub:SetText(""); r.right:SetText(""); r.where:SetText(""); r.where:Hide()
     r.text:SetTextColor(rgba(T.text))
     r.text:SetWordWrap(false)
     r:EnableMouse(true)
@@ -484,10 +486,11 @@ local function itemTooltip(row, r, inst, boss)
   GameTooltip:Show()
 end
 
-local function itemRow(list, r, inst, boss, sub)
+-- `where` (search results): a third line with the boss and dungeon, as wide as the row
+local function itemRow(list, r, inst, boss, sub, where)
   local it = Loot.Item(r.id)
   if not it then return end
-  local row = list:Row(ROW_H)
+  local row = list:Row(where and SEARCH_ROW_H or ROW_H)
   row.icon:SetSize(26, 26)
   row.icon:SetPoint("LEFT", 8, 0)
   row.icon:SetTexture(itemIcon(r.id))
@@ -500,7 +503,15 @@ local function itemRow(list, r, inst, boss, sub)
   row.text:SetPoint("RIGHT", row.right, "LEFT", -24, 0)
   row.text:SetText(it.name)
   row.text:SetTextColor(qualityColor(it.q))
-  row.sub:SetPoint("BOTTOMLEFT", 42, 5)
+  if where then
+    row.sub:SetPoint("TOPLEFT", 42, -19)
+    row.where:SetPoint("BOTTOMLEFT", 42, 5)
+    row.where:SetPoint("RIGHT", -10, 0)
+    row.where:SetText(where)
+    row.where:Show()
+  else
+    row.sub:SetPoint("BOTTOMLEFT", 42, 5)
+  end
   row.sub:SetPoint("RIGHT", row.right, "LEFT", -24, 0)
   row.sub:SetText(sub or Loot.Describe(it))
   if Loot.Have(r.id) then
@@ -523,7 +534,7 @@ local function refreshItems()
     win.itemsSub:SetText(#hits == 0 and "Nothing found" or (countText(#hits, more) .. " drops"))
     for _, e in ipairs(hits) do
       local it = Loot.Item(e.row.id)
-      itemRow(L, e.row, e.inst, e.boss, (e.boss or "Trash mobs") .. ", " .. e.inst.name .. "  \194\183  " .. Loot.Describe(it))
+      itemRow(L, e.row, e.inst, e.boss, Loot.Describe(it), (e.boss or "Trash mobs") .. ", " .. e.inst.name)
     end
     if #hits == 0 then L:Note("No drop matches. Try fewer words, or clear the filters above.") end
     L:End()
@@ -575,6 +586,12 @@ local function refreshBosses()
     r.right:SetPoint("RIGHT", -10, 0)
     r.right:SetText(n > 0 and n or "")
     if (s.boss or 0) == idx then L:Select(r) end
+    r.onEnter = function(self) -- a name too long for the column: the whole name
+      if not (self.text.IsTruncated and self.text:IsTruncated()) then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:AddLine(label, 1, 1, 1)
+      GameTooltip:Show()
+    end
     r.onClick = function() S().boss = idx; win.search:SetText(""); refreshBosses(); refreshItems(); win.items:Top() end
   end
   local all = 0
