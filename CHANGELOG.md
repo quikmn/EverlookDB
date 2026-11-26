@@ -8,12 +8,6 @@
 - Dungeon loot (`/edb loot`): a wider window with wider columns, boss names in full when you hover them, and search results on three lines.
 - Trades, mail from players and the auction house are never noted. A `/reload` is enough after this update.
 
-## Unreleased
-
-- Dungeon loot: the window is wider, so long dungeon and boss names (Scarlet Monastery wings, Commander Springvale) fit. Hover a boss for its full name if it is still cut off.
-- Dungeon loot search: each result shows what the item is on one line and which boss and dungeon drop it on its own line, so neither is cut off.
-- Settings search: the sidebar lights the page of the top result while you search.
-
 ## v0.9.1 (2026-11-26)
 
 - The window's Status page shows the places you recorded in lately, where your NPCs are and any problems in full, instead of cutting each line off at the window's edge.
