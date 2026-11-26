@@ -13,7 +13,7 @@ local _, ns = ...
 local Care = {}
 ns.Care = Care
 
-local TABLES = { "npc", "loot", "obj", "vendor", "quest", "trainer", "beast" }
+local TABLES = { "npc", "loot", "obj", "vendor", "quest", "trainer", "beast", "got" }
 
 local function finite(n) return n == n and n ~= math.huge and n ~= -math.huge end
 
@@ -87,6 +87,13 @@ function Care.Repair(data)
     for item, e in pairs(v.i) do
       if type(e) ~= "table" then v.i[item] = nil; fixed = fixed + 1 end
     end
+  end
+  -- where an item came from: got[item] = { [way] = times }
+  for item, g in pairs(data.got) do
+    for way, n in pairs(g) do
+      if type(way) ~= "string" or type(n) ~= "number" or n < 1 then g[way] = nil; fixed = fixed + 1 end
+    end
+    if next(g) == nil then data.got[item] = nil end
   end
   for _, t in pairs(data.trainer) do
     if type(t.s) ~= "table" then t.s = {}; fixed = fixed + 1 end
@@ -317,6 +324,16 @@ local STAGES = {
           if type(cells) == "table" then for _ in pairs(cells) do count = count + 1 end end
           if count > 12 then rec.p[map] = coarsen(cells, 20); did = true end
         end
+      end
+    end
+    return did
+  end,
+  -- 5: items that arrived with nothing to explain them: the zone they arrived in goes
+  function(d)
+    local did = false
+    for _, g in pairs(type(d.got) == "table" and d.got or {}) do
+      for way in pairs(g) do
+        if tostring(way):find("^%?:") then g[way] = nil; did = true end
       end
     end
     return did

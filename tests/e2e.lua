@@ -24,6 +24,16 @@ LOOT_ITEM_PUSHED_SELF, LOOT_ITEM_PUSHED_SELF_MULTIPLE = "You receive item: %s.",
 CURRENCY_GAINED, CURRENCY_GAINED_MULTIPLE = "You receive currency: %s.", "You receive currency: %s x%d."
 COMBATLOG_XPGAIN_FIRSTPERSON = "%s dies, you gain %d experience."
 MOCK.secretsOn = false
+-- bags and buying, watched through hooks on the game's functions
+W_BAG = {}
+C_Container = {
+	GetContainerItemID = function(_, slot) return W_BAG[slot] and W_BAG[slot].id end,
+	GetContainerItemInfo = function(_, slot) return W_BAG[slot] and { hasLoot = W_BAG[slot].loot } end,
+	UseContainerItem = function() end,
+	PickupContainerItem = function() end,
+}
+SpellIsTargeting = function() return false end
+BuyMerchantItem = function() end
 
 ---------------------------------------------------------------------------------------------------
 -- The world
@@ -225,6 +235,9 @@ W.merchant = { { id = 159, price = 25, stack = 5 }, { id = 4540, price = 100, st
 	{ id = 21000, price = 0, stack = 1, cost = { id = 3402, n = 60 } } }
 MOCK.Fire("MERCHANT_SHOW")
 tick(1)
+-- one of the limited ones bought
+BuyMerchantItem(2, 1)
+MOCK.Fire("CHAT_MSG_LOOT", "You receive item: |cffffffff|Hitem:4540::::|h[Tough Hunk of Bread]|h|r.")
 MOCK.Fire("MERCHANT_CLOSED")
 W.merchant = nil
 
@@ -235,6 +248,10 @@ tick(1)
 W.trainer = nil
 
 talk(9012, "Quest Giver", 8, nil, 0.30, 0.30)
+-- it hands over a recipe while you talk to it
+MOCK.Fire("GOSSIP_SHOW")
+MOCK.Fire("CHAT_MSG_LOOT", "You receive item: |cffffffff|Hitem:274395::::|h[Formula: Enchant Shield]|h|r.")
+MOCK.Fire("GOSSIP_CLOSED")
 W.quest = { id = 9500, title = "A Test of Wolves", reward = { { 6070, 1 } }, choice = { { 60, 1 }, { 61, 1 } }, required = { { 2318, 4 } }, money = 150 }
 MOCK.Fire("QUEST_DETAIL")
 W.inLog = true
@@ -251,6 +268,12 @@ MOCK.Fire("CURRENCY_DISPLAY_UPDATE", 3402, 70, 10)
 MOCK.Fire("CHAT_MSG_LOOT", "You receive item: |cffffffff|Hitem:6070::::|h[Wolfskin Boots]|h|r.")
 tick(5)
 W.units.npc = nil
+
+-- A clam opened from the bags
+W_BAG = { { id = 5523, loot = true } }
+C_Container.UseContainerItem(0, 1)
+loot({ { guid = "Item-0-0-0-00000000ABC1", id = 7909 } })
+W_BAG = {}
 
 -- A loading screen into a dungeon: no zone map, no position, nameplates with secret tokens, hidden names and GUIDs.
 W.inst, W.map, W.x, W.y = { id = 3039, name = "Test Stronghold" }, nil, nil, nil
@@ -305,12 +328,17 @@ local EXPECT = {
 		["f:1429"] = { n = 1, i = { ["6291"] = { 1, 1 } } },
 		["u:9020"] = { n = 1, i = { ["12001"] = { 1, 1 } }, zi = { ["3039"] = 1 } },
 		["u:9021"] = { n = 1, i = { ["12002"] = { 1, 1 }, ["12003"] = { 1, 1 } }, zi = { ["3039"] = 1 } },
+		["i:5523"] = { n = 1, i = { ["7909"] = { 1, 1 } } },
+	},
+	got = {
+		["4540"] = { ["v:9010"] = 1 },
+		["274395"] = { ["g:9012"] = 1 },
 	},
 	obj = {
 		["1618"] = { names = { enUS = { Peacebloom = 1 } }, kind = "h", p = spot(1429, "420:610") },
 	},
 	vendor = {
-		["9010"] = { i = { ["159"] = { price = 25, stack = 5 }, ["4540"] = { price = 100, stack = 1, limited = true },
+		["9010"] = { i = { ["159"] = { price = 25, stack = 5 }, ["4540"] = { price = 100, stack = 1, limited = true, max = 2 },
 			["21000"] = { price = 0, stack = 1, cost = "currency:3402x60" } } },
 	},
 	trainer = {
@@ -349,7 +377,8 @@ local function strKeys(t)
 	return out
 end
 local function vote(v) return v and { [v] = 1 } or nil end
-local VIEW = { npc = {}, loot = {}, obj = {}, vendor = {}, trainer = {}, quest = {} }
+local VIEW = { npc = {}, loot = {}, obj = {}, vendor = {}, trainer = {}, quest = {}, got = {} }
+for item, ways in pairs(d.got or {}) do VIEW.got[tostring(item)] = ways end
 for id, r in pairs(d.npc) do
 	local svc
 	if r.svc then svc = {}; for k in pairs(r.svc) do svc[#svc + 1] = k end; table.sort(svc) end
@@ -365,7 +394,7 @@ end
 for id, r in pairs(d.obj) do VIEW.obj[tostring(id)] = { names = { enUS = r.name and { [r.name] = 1 } }, kind = r.kind, p = cells(r.p) } end
 for id, r in pairs(d.vendor) do
 	local items = {}
-	for item, e in pairs(r.i) do items[tostring(item)] = { price = e.price, stack = e.stack, limited = e.limited and true or nil, cost = e.cost } end
+	for item, e in pairs(r.i) do items[tostring(item)] = { price = e.price, stack = e.stack, limited = e.limited and true or nil, max = e.max, cost = e.cost } end
 	VIEW.vendor[tostring(id)] = { i = items }
 end
 for id, r in pairs(d.trainer) do
@@ -410,7 +439,7 @@ if not (g.npcs == 9 and g.noName == 1 and g.exact == 6 and g.approx == 1 and g.i
 	fail(("gaps: npcs %s, noName %s, exact %s, approx %s, inst %s, zoneOnly %s, noLoc %s"):format(tostring(g.npcs), tostring(g.noName),
 		tostring(g.exact), tostring(g.approx), tostring(g.inst), tostring(g.zoneOnly), tostring(g.noLoc)))
 end
-if not (h.rec and h.rec.npc == 9 and h.rec.loot == 7 and h.rec.looted == 7 and h.rec.quest == 1 and h.rec.vendor == 1 and h.rec.trainer == 1 and h.rec.obj == 1) then
+if not (h.rec and h.rec.npc == 9 and h.rec.loot == 8 and h.rec.looted == 8 and h.rec.got == 2 and h.rec.quest == 1 and h.rec.vendor == 1 and h.rec.trainer == 1 and h.rec.obj == 1) then
 	fail("the addon's own row counts are off")
 end
 -- /edb status after the run names the dungeon and the open world

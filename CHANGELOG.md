@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The Collector now notes where you got an item when no loot window shows it: bought from which vendor, given by an NPC or when you took a quest, made with a craft or by using another item, or sent by an NPC's mail. Many recipes on EverlookDB.com still say "source unknown", so every upload helps fill them in.
+- What a clam, lockbox or other item from your bags held is counted, and what disenchanting gave.
+- Vendors that sell something in limited stock (often recipes) note how many they had at once.
+- Trades, mail from players and the auction house are never noted. A `/reload` is enough after this update.
+
+## Unreleased
+
 - Dungeon loot: the window is wider, so long dungeon and boss names (Scarlet Monastery wings, Commander Springvale) fit. Hover a boss for its full name if it is still cut off.
 - Dungeon loot search: each result shows what the item is on one line and which boss and dungeon drop it on its own line, so neither is cut off.
 - Settings search: the sidebar lights the page of the top result while you search.

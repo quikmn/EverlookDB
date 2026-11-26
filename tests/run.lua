@@ -34,6 +34,25 @@ LOOT_ITEM_PUSHED_SELF, LOOT_ITEM_PUSHED_SELF_MULTIPLE = "You receive item: %s.",
 CURRENCY_GAINED, CURRENCY_GAINED_MULTIPLE = "You receive currency: %s.", "You receive currency: %s x%d."
 CURRENCY_GAINED_MULTIPLE_BONUS = "You receive currency: %s x%d. (Bonus Objective)"
 COMBATLOG_XPGAIN_FIRSTPERSON = "%s dies, you gain %d experience."
+LOOT_ITEM_CREATED_SELF, LOOT_ITEM_CREATED_SELF_MULTIPLE = "You create: %s.", "You create: %sx%d."
+-- bags, mail and buying, which the collector watches through hooks (defined before it loads, as in the game)
+MOCK.bag, MOCK.mail, MOCK.targeting = {}, {}, false
+C_Container = {
+	GetContainerItemID = function(_, slot) return MOCK.bag[slot] and MOCK.bag[slot].id end,
+	GetContainerItemInfo = function(_, slot) local b = MOCK.bag[slot]; return b and { hasLoot = b.loot } end,
+	UseContainerItem = function() end,
+	PickupContainerItem = function() end,
+}
+SpellIsTargeting = function() return MOCK.targeting end
+BuyMerchantItem = function() end
+GetInboxHeaderInfo = function(i)
+	local m = MOCK.mail[i]
+	if m then return nil, nil, "Someone", "Subject", 0, 0, 3, true, false, false, true, m.canReply, false end
+end
+GetInboxInvoiceInfo = function(i) return MOCK.mail[i] and MOCK.mail[i].invoice end
+GetInboxItemLink = function(i, a) local m = MOCK.mail[i]; return m and m.items[a] end
+TakeInboxItem = function() end
+AutoLootMailItem = function() end
 
 local globalWrites = {}
 local addonEnv = setmetatable({}, { __index = _G, __newindex = function(_, k, v) globalWrites[k] = true; _G[k] = v end })
@@ -719,6 +738,93 @@ step("quests: a hand-in window notes the title; an objective still loading doesn
 	MOCK.Fire("QUEST_ACCEPTED", 5545)
 	runTimers(2)
 	check(EverlookDBData.quest[5545].objectives[1] == "item|8|Bundle of Wood", "full list replaced")
+	unstubAll()
+end)
+
+step("where an item came from: bought, given, on taking a quest, crafted, mailed, unexplained", function()
+	local got = function(item) return EverlookDBData.got[item] or {} end
+	local push = function(id) MOCK.Fire("CHAT_MSG_LOOT", "You receive item: " .. itemLink(id) .. ".") end
+	MOCK.time = MOCK.time + 200
+	-- bought: the purchase asked for, then its line; buying back (no purchase asked for) says nothing
+	stub("UnitGUID", function(u) if u == "npc" then return "Creature-0-1-2-3-4561-0000BB0009" end end)
+	stub("UnitExists", function() return false end)
+	stub("UnitReaction", function() return 5 end)
+	stub("GetMerchantNumItems", function() return 1 end)
+	stub("GetMerchantItemLink", function() return itemLink(274395) end)
+	stub("C_MerchantFrame", { GetItemInfo = function() return { price = 50000, stackCount = 1, numAvailable = 2 } end })
+	MOCK.Fire("MERCHANT_SHOW")
+	BuyMerchantItem(1, 1)
+	push(274395)
+	push(2589)
+	MOCK.Fire("MERCHANT_CLOSED")
+	check(got(274395)["v:4561"] == 1, "purchase not noted")
+	check(not EverlookDBData.got[2589], "a buyback noted")
+	local e = EverlookDBData.vendor[4561].i[274395]
+	check(e.limited == 1 and e.max == 2, "limited stock: " .. tostring(e.limited) .. " " .. tostring(e.max))
+	-- given while talking to an NPC
+	MOCK.Fire("GOSSIP_SHOW")
+	push(242361)
+	MOCK.Fire("GOSSIP_CLOSED")
+	local w = {}; for k in pairs(got(242361)) do w[#w + 1] = k end
+	check(got(242361)["g:4561"] == 1, "given by an NPC: " .. table.concat(w, ","))
+	unstubAll()
+	-- given on taking a quest (and not later)
+	MOCK.Fire("QUEST_ACCEPTED", 1, 9001)
+	push(5000)
+	MOCK.time = MOCK.time + 5
+	push(5001)
+	check(got(5000)["qa:9001"] == 1, "quest item not noted")
+	check(got(5001)["?:1429"] == 1 and not got(5001)["qa:9001"], "a later item taken for the quest's")
+	-- crafted: the spell just cast
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", nil, 7421)
+	MOCK.Fire("CHAT_MSG_LOOT", "You create: " .. itemLink(6218) .. ".")
+	check(got(6218)["cr:7421"] == 1, "crafted")
+	-- mail: an NPC's counts; a player's and the auction house's never
+	MOCK.time = MOCK.time + 10
+	MOCK.mail = { { canReply = false, items = { itemLink(13509) } }, { canReply = true, items = { itemLink(13510) } },
+		{ canReply = false, invoice = "seller", items = { itemLink(13511) } } }
+	MOCK.Fire("MAIL_SHOW")
+	TakeInboxItem(1, 1); TakeInboxItem(2, 1); AutoLootMailItem(3)
+	push(13509)
+	MOCK.Fire("MAIL_CLOSED")
+	check(got(13509).m == 1 and not got(13509)["?:1429"], "NPC mail")
+	check(not EverlookDBData.got[13510] and not EverlookDBData.got[13511], "a player's or the AH's mail noted")
+	-- a trade with a player says nothing
+	MOCK.Fire("TRADE_SHOW"); push(4306); MOCK.Fire("TRADE_CLOSED")
+	check(not EverlookDBData.got[4306], "a trade noted")
+	-- the data names no player
+	for _, ways in pairs(EverlookDBData.got) do
+		for way in pairs(ways) do check(way:match("^[%a?]+:?%d*$"), "odd way " .. way) end
+	end
+end)
+
+step("loot: an item opened from the bags or disenchanted is counted under that item; a potion before a hidden corpse is not", function()
+	local L = EverlookDBData.loot
+	MOCK.time = MOCK.time + 10
+	MOCK.bag = { { id = 5523, loot = true }, { id = 10000 }, { id = 118, loot = false } }
+	C_Container.UseContainerItem(0, 1)
+	openLoot({ ["Item-0-0-0-00000ABC"] = { 7909, 5498 } })
+	check(L["i:5523"] and L["i:5523"].n == 1 and L["i:5523"].i[7909][1] == 1, "clam not counted")
+	MOCK.time = MOCK.time + 10
+	C_Container.UseContainerItem(0, 1)
+	openLoot({ ["Item-0-0-0-00000ABD"] = { 7909 } })
+	check(L["i:5523"].n == 2 and L["i:5523"].i[7909][1] == 2 and L["i:5523"].i[5498][1] == 1, "second clam")
+	-- disenchanting: the cast, then the item clicked
+	MOCK.time = MOCK.time + 10
+	MOCK.targeting = true
+	C_Container.PickupContainerItem(0, 2)
+	MOCK.targeting = false
+	MOCK.time = MOCK.time + 3  -- the cast
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", nil, 13262)
+	openLoot({ ["Item-0-0-0-00000ABE"] = { 10940 } })
+	check(L["d:10000"] and L["d:10000"].i[10940], "disenchant not counted")
+	check(not L["i:10000"], "disenchant counted as opened")
+	-- a potion drunk, then a corpse whose source the game hides
+	MOCK.time = MOCK.time + 10
+	C_Container.UseContainerItem(0, 3)
+	openLoot({ [MOCK.Secret("Creature-0-1-2-3-99-0000C00001")] = { 2589 } })
+	check(not L["i:118"] and not L["d:118"], "a potion taken for a container")
+	MOCK.bag = {}
 	unstubAll()
 end)
 

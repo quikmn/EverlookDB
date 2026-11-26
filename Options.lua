@@ -47,8 +47,8 @@ end
 
 local function StatusLine()
   local s = ns.Status()
-  local line = ("Recorded: %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests."):format(
-    s.npcs, s.loot, s.looted, s.objects, s.vendors, s.trainers, s.quests)
+  local line = ("Recorded: %d NPCs, %d loot sources (%d looted), %d objects, %d vendors, %d trainers, %d quests, %d items' sources."):format(
+    s.npcs, s.loot, s.looted, s.objects, s.vendors, s.trainers, s.quests, s.got or 0)
   local beasts, tames, lore = ns.BeastStatus()
   if beasts > 0 then line = line .. (" Beast abilities: %d beasts (%d tames, %d Beast Lore reads)."):format(beasts, tames, lore) end
   return line
@@ -91,6 +91,7 @@ app:Section("status", "Status", function(stack)
   UI.Stat(stack, "Vendors", N("vendors"))
   UI.Stat(stack, "Trainers", N("trainers"))
   UI.Stat(stack, "Quests", N("quests"))
+  UI.Stat(stack, "Where items came from", N("got"))
   UI.Stat(stack, "Beasts (hunters)", function()
     local beasts, tames, lore = ns.BeastStatus()
     if beasts == 0 then return "none yet" end
@@ -136,7 +137,8 @@ app:Section("records", "What it records", function(stack)
   UI.Note(stack, "|cffe6e8eeLoot|r  what each mob dropped, what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node counts once, which is what gives drop rates.")
   UI.Note(stack, "|cffe6e8eeNPCs|r  name, level, type and family, rare or elite, skinnable, health per level, the zones and dungeons they are in, and where they stand. Exact positions are taken only when you are within about 10 yards; within about 28 yards a rough spot is noted apart.")
   UI.Note(stack, "|cffe6e8eeServices|r  flight masters, bankers, auctioneers, stable masters, innkeepers and trainers, and what each trainer teaches, for how much, from which level.")
-  UI.Note(stack, "|cffe6e8eeVendors|r  what they sell, the price, the stack size and whether stock is limited.")
+  UI.Note(stack, "|cffe6e8eeVendors|r  what they sell, the price, the stack size and whether stock is limited (and how many at most).")
+  UI.Note(stack, "|cffe6e8eeWhere items came from|r  when an item reaches your bags without a loot window: bought from which vendor, given by an NPC or on taking a quest, made by a craft or by using an item, or sent by an NPC's mail. What a clam, lockbox or other item opened from your bags held, and what disenchanting gave. Never trades, players' mail or the auction house.")
   UI.Note(stack, "|cffe6e8eeQuests|r  who starts and ends each quest and where, the lowest level it was offered at, objectives, required items, rewards (items and currencies) and XP, and what handing it in actually gave you.")
   UI.Note(stack, "|cffe6e8eeXP|r  the XP a kill gave when you play solo.")
   UI.Note(stack, "|cffe6e8eeHunters|r  when you tame a beast: which beast it was and its level, and what the new pet knows in its first 30 seconds (its abilities and ranks, Faster or Slower Attack, attack speed, level, family, training points and diet). When you cast Beast Lore: the lines it adds to the beast's tooltip, the beast and its level. Never the pet's name. Kept as counts with the game version and the week, never the day or time.")

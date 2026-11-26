@@ -17,6 +17,7 @@ Drop chances come from what players looted in WoW Forever, and every upload fill
 - **Loot:** what each mob dropped (and in which dungeon), what skinning and pickpocketing gave, and what came from herbs, ore veins, chests and fishing. Each corpse or node is counted once, which is what gives drop rates.
 - **NPCs:** name, level, type and family, whether they are rare or elite, whether they can be skinned, and where they stand.
 - **Vendors and trainers:** what they sell or teach, the price, and whether stock is limited.
+- **Where items came from:** bought from which vendor, given by an NPC or a quest, made by a craft, or what a clam or lockbox held. That fills in where recipes come from.
 - **Quests:** who starts and ends each quest and where, the lowest level it was offered at, its objectives, required items and rewards.
 
 ## What it never records

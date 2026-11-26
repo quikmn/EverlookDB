@@ -61,6 +61,7 @@ local function placeLine(e, db)
   add("handins", "quest handed in", "quests handed in")
   add("vendors", "vendor", "vendors")
   add("trainers", "trainer", "trainers")
+  add("got", "item noted where it came from", "items noted where they came from")
   add("unread", "loot window not readable (not counted)", "loot windows not readable (not counted)")
   add("errors", "error", "errors")
   if #parts == 0 then return nil end

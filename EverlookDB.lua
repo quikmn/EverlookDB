@@ -9,6 +9,10 @@
 --   quests   who starts and ends each quest, where, the lowest level it was offered at, objectives, rewards
 --            (items, choices, currencies), XP, and what turning it in actually gave (currencies, items)
 --   beasts   (hunters, Beasts.lua) what a freshly tamed pet knows and what Beast Lore shows, by the beast's npc id
+--   got      how an item reached your bags when no loot window explains it: bought from which vendor, given by an
+--            NPC, given on taking a quest, made by a spell, made by using an item, sent by an NPC's mail, or nothing
+--            seen (with the zone); also loot["i:<item>"] what an item opened from your bags held, ["d:<item>"] what
+--            disenchanting it gave
 -- Nothing about you is saved: no character, realm or player names, no chat, no other players.
 -- Everything goes into SavedVariables (EverlookDB.lua); upload that file on EverlookDB.com.
 -- /edb opens the window (what's recorded, saving, privacy, options); /edb help lists the commands.
@@ -30,7 +34,7 @@ if not G or not Care then
   }
   Care = Care or {
     Repair = function(d)
-      for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast" }) do
+      for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast", "got" }) do
         if type(d[name]) ~= "table" then d[name] = {} end
       end
       return 0
@@ -587,7 +591,11 @@ local GATHER_SPELLS = {
   m = { 2575, 2576, 3564, 10248 },   -- Mining
   p = { 921 },                       -- Pick Pocket
 }
-local lastCast, lastCastAt = nil, 0
+local lastCast, lastCastAt, lastCastID = nil, 0, nil
+local DISENCHANT = 13262
+-- the item last used or targeted in your bags (a clam opened, an item disenchanted): { id, at, loot = it opens }
+local lastUsed
+local lootOpen, lootClosedAt = false, 0
 local lastObjectName, lastObjectAt = nil, 0
 local looted = seenSet(2000)  -- "kind..guid" already counted this session (the latest few thousand)
 -- without trusted GUIDs: the same kind of loot from the same NPC or object near the same spot (a 2% cell) within
@@ -651,8 +659,24 @@ local function readCorpse(id, guid)
   changes = changes + 1
 end
 
+-- The item opened from your bags just before this loot window (a clam, a lockbox, a bag of loot), or disenchanted
+-- (cast, then the item clicked): -> "i" or "d", its id. Only when nothing in the window comes from a creature or
+-- object, and the game names an item as its source or the item said it opens; a potion drunk before looting a
+-- corpse whose source is hidden is never taken for it.
+local function usedFor(itemSource)
+  local u, now = lastUsed, GetTime()
+  if not u then return nil end
+  -- Disenchant: the item is clicked, then the cast takes 3 seconds
+  if lastCastID == DISENCHANT and now - lastCastAt < 3 then
+    if now - u.at < 8 then return "d", u.id end
+    return nil
+  end
+  if now - u.at > (itemSource and 8 or 3) then return nil end
+  if itemSource or u.loot then return "i", u.id end
+end
+
 -- Read the open loot window, counting nothing yet. -> nil when it is empty, else
---   { sources, order, fished, fishing, bad, sig }
+--   { sources, order, fished, fishing, bad, sig, container = { kind, id, items } }
 -- bad: item slots that can't be counted right now (the item is still loading, or the game hides what it came from).
 local function scanLoot()
   local slots = num(safe(GetNumLootItems)) or 0
@@ -663,6 +687,7 @@ local function scanLoot()
   local fished = {}  -- every slot's items, for fishing (which has no mob or object)
   local fishing = safe(IsFishingLoot) and true or false
   local bad, sig = 0, { slots }
+  local all, loading, itemSource, hiddenAny = {}, 0, false, false  -- every slot's items, for an item opened from bags
   local function src(guid)
     local sk, id = parseGUID(guid)
     if not sk then return nil end
@@ -679,8 +704,16 @@ local function scanLoot()
     -- ours: it comes from a creature or object (what we count); hidden: the game won't say what it comes from.
     -- Anything else (a clam or lockbox opened from your bags) is not ours to count and no reason to wait.
     local credited, ours, hidden = false, false, false
+    if id then
+      local qty = num(info[2])
+      if not qty and GetLootSlotInfo then local _; _, _, qty = safe(GetLootSlotInfo, slot); qty = num(qty) end
+      all[id] = (all[id] or 0) + (qty or 1)
+    elseif isItem then
+      loading = loading + 1
+    end
     for j = 1, info.n, 2 do
       local guid, qty = info[j], num(info[j + 1]) or 1
+      if type(guid) == "string" and guid:find("^Item%-") then itemSource = true end
       if type(guid) == "string" then
         if id and fishing then fished[id] = (fished[id] or 0) + qty; credited = true end
         local s = src(guid)
@@ -692,6 +725,7 @@ local function scanLoot()
         end
       else
         hidden = true
+        hiddenAny = true
       end
     end
     if fishing and id and not credited then
@@ -703,7 +737,17 @@ local function scanLoot()
     end
     if isItem and not credited and (ours or hidden or fishing) then bad = bad + 1; sig[#sig + 1] = "?" .. (id or 0) end
   end
-  return { sources = sources, order = order, fished = fished, fishing = fishing, bad = bad, sig = table.concat(sig, ",") }
+  local container
+  if #order == 0 and not fishing and not (hiddenAny and not itemSource) then
+    local kind, from = usedFor(itemSource)
+    if kind then
+      container = { kind = kind, id = from, items = all }
+      bad = loading
+      sig[#sig + 1] = kind .. from
+    end
+  end
+  return { sources = sources, order = order, fished = fished, fishing = fishing, bad = bad, sig = table.concat(sig, ","),
+    container = container }
 end
 
 local function countItems(items)
@@ -729,6 +773,23 @@ local function countLoot(read)
       rec.i[id] = it
     end
     tally("loot"); tally("items", countItems(read.fished))
+    return
+  end
+  if read.container then
+    -- an item opened from your bags, or disenchanted: keyed by that item ("i:<id>", "d:<id>"), counted per opening
+    local c = read.container
+    lastUsed, lastCast, lastCastID = nil, nil, nil
+    if read.bad > 0 then G.count("lootUnread"); tally("unread"); return end
+    local rec = lootRecord(c.kind .. ":" .. c.id)
+    rec.n = rec.n + 1
+    for item, qty in pairs(c.items) do
+      local it = rec.i[item] or { 0, 0 }
+      it[1], it[2] = it[1] + 1, it[2] + qty
+      rec.i[item] = it
+    end
+    moneySources = { rec }
+    moneyBefore = num(safe(GetMoney))
+    tally("loot"); tally("items", countItems(c.items))
     return
   end
 
@@ -812,6 +873,7 @@ end
 
 local function lootClosed()
   -- state first: whatever fails below, the next loot window is read
+  lootOpen, lootClosedAt = false, GetTime()
   local p = pendingLoot
   pendingLoot = nil
   if p then G.run("loot:closing", finishLoot, p.read) end
@@ -911,7 +973,11 @@ local function readVendor()
       v.i[item] = e
       if price then e.price = price end
       if stack then e.stack = stack end
-      if avail then e.limited = avail >= 0 and 1 or nil end
+      if avail then
+        e.limited = avail >= 0 and 1 or nil
+        -- limited stock (a recipe sold one at a time): the most seen at once
+        if avail > 0 then e.max = math.max(num(e.max) or 0, math.min(avail, 1000)) end
+      end
       if reaction then e.react = reaction end
       if extended then
         -- "item:123x2,currency:3402x60"; left as it was when any part is unknown (a partial cost would read as cheaper)
@@ -1235,12 +1301,137 @@ local function chatGain(text, one, many, linkKind)
   return tonumber(link:match(linkKind .. ":(%d+)")), tonumber(n)
 end
 
+---------------------------------------------------------------------------------------------------
+-- Where an item came from when no loot window explains it: the "You receive item" line (and "You create") with
+-- what was going on at that moment. db.got = { [item] = { [way] = times } }, the ways:
+--   "v:<npc>"   bought from that vendor (the price is in its stock, db.vendor)
+--   "g:<npc>"   given while talking to that NPC
+--   "qa:<quest>" given on taking that quest
+--   "cr:<spell>" made by that spell (crafting)
+--   "use:<item>" made by using that item
+--   "m"         sent by an NPC's or the game's mail (never a player's, never the auction house's)
+--   "?:<map>"   nothing seen that explains it, and the zone map (0 when unknown)
+-- Loot windows, trades with players, the auction house and hand-ins (quest.got) are never counted here.
+
+local GOT_ITEMS, GOT_WAYS = 3000, 8
+local gotCount            -- items in db.got (counted once, then kept)
+local gossipNpc, mailOpen, tradeOpen = nil, false, false
+local questOpen           -- when a hand-in window opened (QUEST_FINISHED closes it; a lost one counts 2 minutes)
+local lastAccepted        -- { q, at }: a quest just taken
+local bought = {}         -- [item] = { npc, at }: a purchase asked for, until its line comes
+
+local function noteGot(item, way)
+  if paused or not db or not item or item <= 0 or not way then return end
+  if type(db.got) ~= "table" then db.got = {}; gotCount = 0 end
+  local g = db.got[item]
+  if type(g) ~= "table" then
+    if not gotCount then gotCount = 0; for _ in pairs(db.got) do gotCount = gotCount + 1 end end
+    if gotCount >= GOT_ITEMS then G.count("gotFull"); return end
+    g = {}; db.got[item] = g; gotCount = gotCount + 1
+  end
+  if not g[way] then
+    local ways = 0
+    for _ in pairs(g) do ways = ways + 1 end
+    if ways >= GOT_WAYS then return end
+  end
+  g[way] = math.min((tonumber(g[way]) or 0) + 1, 1000000)
+  changes = changes + 1
+  tally("got")
+end
+ns.NoteGot = noteGot
+
+-- the "You receive item" line, with what is going on now
+local function arrived(id)
+  if paused or not id then return end
+  local now = GetTime()
+  if tradeOpen or mailOpen or lootOpen or now - lootClosedAt < 1 then return end
+  if merchantOpen then
+    local b = bought[id]
+    bought[id] = nil
+    if b and now - b.at < 10 then noteGot(id, "v:" .. b.npc) end
+    return  -- (buying back what you sold says nothing)
+  end
+  if (questOpen and now - questOpen < 120) or (watch and now <= watch.ends) then return end  -- a hand-in: quest.got
+  if lastAccepted and now - lastAccepted.at < 3 then return noteGot(id, "qa:" .. lastAccepted.q) end
+  if gossipNpc then return noteGot(id, "g:" .. gossipNpc) end
+  if lastUsed and now - lastUsed.at < 3 and lastUsed.id ~= id then return noteGot(id, "use:" .. lastUsed.id) end
+  noteGot(id, "?:" .. (where() or 0))
+end
+
+-- "You create: [x]": the spell cast just before made it
+local function made(id)
+  if paused or not id or not lastCastID or GetTime() - lastCastAt > 5 then return end
+  noteGot(id, "cr:" .. lastCastID)
+end
+
+local ITEM_CREATED = toPattern(_G.LOOT_ITEM_CREATED_SELF)
+local ITEM_CREATED_N = toPattern(_G.LOOT_ITEM_CREATED_SELF_MULTIPLE)
+
 local function lootLine(text)
   text = ok(text)
-  if paused or merchantOpen or type(text) ~= "string" then return end
+  if paused or type(text) ~= "string" then return end
   local id, n = chatGain(text, ITEM_PUSHED, ITEM_PUSHED_N, "item")
-  if id then gain("i", id, n) end
+  if id then
+    if not merchantOpen then gain("i", id, n) end
+    G.run("got:line", arrived, id)
+    return
+  end
+  id = chatGain(text, ITEM_CREATED, ITEM_CREATED_N, "item")
+  if id then made(id) end
 end
+
+-- What the player does with the game's own buttons, seen through hooks (they run after the game's function and
+-- change nothing): buying, using or targeting an item in the bags, taking an item out of the mail.
+local function containerID(bag, slot)
+  local C = C_Container
+  local get = (type(C) == "table" and C.GetContainerItemID) or _G.GetContainerItemID
+  return get and num(safe(get, bag, slot))
+end
+local function usedItem(bag, slot)
+  if paused then return end
+  local id = containerID(bag, slot)
+  if not id then return end
+  local C = C_Container
+  local info = type(C) == "table" and C.GetContainerItemInfo and safe(C.GetContainerItemInfo, bag, slot)
+  lastUsed = { id = id, at = GetTime(), loot = type(info) == "table" and ok(info.hasLoot) == true }
+end
+local function pickedUp(bag, slot)
+  -- a spell waiting for its item (Disenchant, Pick Lock): the item clicked is its target
+  if SpellIsTargeting and safe(SpellIsTargeting) then usedItem(bag, slot) end
+end
+local function boughtItem(index)
+  if paused then return end
+  local kind, npc = parseGUID(UnitGUID("npc"))
+  local id = itemID(safe(GetMerchantItemLink, index))
+  if kind == "u" and id then bought[id] = { npc = npc, at = GetTime() } end
+end
+local MAIL_ATTACHMENTS = 16
+local function mailItem(index, attach)
+  if paused then return end
+  -- only mail nobody can reply to (an NPC's or the game's), never a GM's, and never the auction house's
+  local _, _, _, _, _, _, _, _, _, _, _, canReply, isGM = safe(GetInboxHeaderInfo, index)
+  if canReply ~= false or isGM then return end
+  if GetInboxInvoiceInfo and safe(GetInboxInvoiceInfo, index) then return end
+  for a = attach or 1, attach or MAIL_ATTACHMENTS do
+    noteGot(itemID(safe(GetInboxItemLink, index, a)), "m")
+  end
+end
+local function hook(t, name, fn)
+  if type(t) == "table" and type(t[name]) == "function" and hooksecurefunc then
+    hooksecurefunc(t, name, G.wrap("hook:" .. name, fn))
+  end
+end
+if type(C_Container) == "table" then
+  hook(C_Container, "UseContainerItem", usedItem)
+  hook(C_Container, "PickupContainerItem", pickedUp)
+end
+if not (type(C_Container) == "table" and C_Container.UseContainerItem == _G.UseContainerItem) then
+  hook(_G, "UseContainerItem", usedItem)
+  hook(_G, "PickupContainerItem", pickedUp)
+end
+hook(_G, "BuyMerchantItem", boughtItem)
+hook(_G, "TakeInboxItem", mailItem)
+hook(_G, "AutoLootMailItem", function(index) mailItem(index) end)
 
 local function currencyLine(text)
   text = ok(text)
@@ -1352,7 +1543,7 @@ local function init()
   -- first of all a file every later step can rely on: tables are tables, rows are rows (Care.lua)
   local okRepair, repaired = G.run("repair", Care.Repair, db)
   if not okRepair then
-    for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast" }) do
+    for _, name in ipairs({ "npc", "loot", "obj", "vendor", "quest", "trainer", "beast", "got" }) do
       if type(db[name]) ~= "table" then db[name] = {} end
     end
   end
@@ -1447,7 +1638,7 @@ local function beforeSave()
     for _, rec in pairs(db.loot) do looted = looted + (tonumber(rec.n) or 0) end
     local function n(t) local c = 0; for _ in pairs(t) do c = c + 1 end; return c end
     h.rec = { npc = n(db.npc), loot = n(db.loot), looted = looted, obj = n(db.obj), vendor = n(db.vendor),
-      quest = n(db.quest), trainer = n(db.trainer) }
+      quest = n(db.quest), trainer = n(db.trainer), got = n(type(db.got) == "table" and db.got or {}) }
   end)
 end
 ns.BeforeSave = beforeSave
@@ -1489,6 +1680,7 @@ local handlers = {
   PLAYER_ENTERING_WORLD = function()
     pendingLoot, lootDone, lootSig, moneySources, moneyBefore = nil, false, nil, nil, nil
     merchantOpen, lastCast, lastObjectName = false, nil, nil
+    lootOpen, gossipNpc, mailOpen, tradeOpen, questOpen, lastUsed, lastAccepted = false, nil, false, false, nil, nil, nil
     ns.PlaceChanged()
     C_Timer.After(5, G.wrap("timer:questlog", sweepQuestLog))
   end,
@@ -1507,16 +1699,27 @@ local handlers = {
   NAME_PLATE_UNIT_REMOVED = ns.ForgetToken,
   UNIT_SPELLCAST_SUCCEEDED = function(unit, _, spellID)
     if unit ~= "player" then return end
-    lastCast, lastCastAt = spellName(spellID), GetTime()
+    lastCastID = num(spellID)
+    lastCast, lastCastAt = lastCastID and spellName(lastCastID), GetTime()
   end,
-  LOOT_READY = function() readLoot() end,
-  LOOT_OPENED = function() readLoot() end,
+  LOOT_READY = function() lootOpen = true; readLoot() end,
+  LOOT_OPENED = function() lootOpen = true; readLoot() end,
   LOOT_CLOSED = lootClosed,
   MERCHANT_SHOW = function()
     merchantOpen = true
     vendorOpened()
   end,
-  GOSSIP_SHOW = function() readUnit("npc", true) end,
+  GOSSIP_SHOW = function()
+    readUnit("npc", true)
+    local kind, id = parseGUID(UnitGUID("npc"))
+    gossipNpc = kind == "u" and id or nil
+  end,
+  GOSSIP_CLOSED = function() gossipNpc = nil end,
+  MAIL_SHOW = function() mailOpen = true end,
+  MAIL_CLOSED = function() mailOpen = false end,
+  TRADE_SHOW = function() tradeOpen = true end,
+  TRADE_CLOSED = function() tradeOpen = false end,
+  QUEST_FINISHED = function() questOpen = nil end,
   TRAINER_SHOW = function() C_Timer.After(0.5, G.wrap("timer:trainer", readTrainer)) end,   -- the list fills in a moment later
   TAXIMAP_OPENED = function() service("taxi") end,
   BANKFRAME_OPENED = function() service("bank") end,
@@ -1527,13 +1730,13 @@ local handlers = {
   QUEST_DETAIL = questDetail,
   QUEST_ACCEPTED = function(a, b)  -- (questID) or (logIndex, questID)
     local qid = num(b) or num(a)
-    if qid then swept[qid] = true end
+    if qid then swept[qid] = true; lastAccepted = { q = qid, at = GetTime() } end
     if not paused then tally("quests") end
     questAccepted(qid)
   end,
-  MERCHANT_CLOSED = function() merchantOpen = false end,
+  MERCHANT_CLOSED = function() merchantOpen = false; bought = {} end,
   QUEST_PROGRESS = questProgress,
-  QUEST_COMPLETE = questComplete,
+  QUEST_COMPLETE = function() questOpen = GetTime(); questComplete() end,
   QUEST_TURNED_IN = function(qid, xp, money)
     qid = num(qid)
     if paused or not qid or qid <= 0 then return end
@@ -1587,7 +1790,7 @@ function ns.Status()
   local s = {
     npcs = count(db.npc), loot = count(db.loot), looted = kills, objects = count(db.obj),
     vendors = count(db.vendor), trainers = count(db.trainer), quests = count(db.quest),
-    beasts = count(db.beast or {}),
+    beasts = count(db.beast or {}), got = count(type(db.got) == "table" and db.got or {}),
     since = db.since, unsaved = changes, lastSave = settings and settings.lastSave,
   }
   statusCache, statusAt = s, now
