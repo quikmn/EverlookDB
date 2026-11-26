@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+
+- Each upload says when you were last in game, in which region and on which game version, so EverlookDB.com's status page can show the game is up even when nobody scans the auction house. A `/reload` is enough after this update.
+
 ## v0.10.0 (2026-11-26)
 
 - The Collector now notes where you got an item when no loot window shows it: bought from which vendor, given by an NPC or when you took a quest, made with a craft or by using another item, or sent by an NPC's mail. Many recipes on EverlookDB.com still say "source unknown", so every upload helps fill them in.

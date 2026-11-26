@@ -1271,6 +1271,32 @@ do
 	chunk()
 end
 
+step("seen: login and logout note when and in which region the game last wrote the file", function()
+	-- the mock has no region API: the time is noted, the region left out
+	MOCK.Fire("PLAYER_LOGOUT")
+	local s = EverlookDBData.seen
+	check(type(s) == "table" and type(s.at) == "number" and os.time() - s.at <= 5, "seen.at: " .. tostring(s and s.at))
+	check(s.region == nil, "region without an API: " .. tostring(s.region))
+	-- the region's name when the game gives it
+	stub("GetCurrentRegionName", function() return "EU" end)
+	ns.NoteSeen()
+	check(EverlookDBData.seen.region == "EU", "name: " .. tostring(EverlookDBData.seen.region))
+	-- only its number: mapped; an unknown one or a name that isn't one is left out
+	stub("GetCurrentRegionName", function() return "" end)
+	stub("GetCurrentRegion", function() return 1 end)
+	ns.NoteSeen()
+	check(EverlookDBData.seen.region == "US", "number: " .. tostring(EverlookDBData.seen.region))
+	stub("GetCurrentRegion", function() return 99 end)
+	ns.NoteSeen()
+	check(EverlookDBData.seen.region == nil, "unknown number: " .. tostring(EverlookDBData.seen.region))
+	-- an API that throws costs nothing but the region
+	stub("GetCurrentRegionName", function() error("no") end)
+	stub("GetCurrentRegion", function() error("no") end)
+	MOCK.Fire("PLAYER_LOGOUT")
+	check(EverlookDBData.seen.region == nil and type(EverlookDBData.seen.at) == "number", "after errors")
+	unstubAll()
+end)
+
 step("no Lua errors reported", function()
 	print("health.log at the end:")
 	for _, l in ipairs(EverlookDBData.health.log or {}) do print("    " .. l) end

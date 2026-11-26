@@ -1618,8 +1618,24 @@ end))
 
 -- Just before the game writes the file (logout, reload): finish what is half done, then note how complete and
 -- how big the file is (health.gaps, health.rec, health.bytes) so the site can tell when something goes missing.
+-- when this file was last written from the game, and in which region: the site's status page shows when a player
+-- was last in game there and on which build, even when nobody opens the auction house. Nothing about the player.
+local REGION_NAMES = { [1] = "US", [2] = "KR", [3] = "EU", [4] = "TW", [5] = "CN" }
+local function currentRegion()
+  local name = GetCurrentRegionName and safe(GetCurrentRegionName)
+  if type(name) == "string" and name:match("^%u%u$") then return name end
+  local id = GetCurrentRegion and safe(GetCurrentRegion)
+  return REGION_NAMES[id]
+end
+local function noteSeen()
+  if not db then return end
+  db.seen = { at = time(), region = currentRegion() }
+end
+ns.NoteSeen = noteSeen
+
 local function beforeSave()
   if not db then return end
+  G.run("save:seen", noteSeen)
   G.run("save:handin", ns.CloseRewardWatch)
   if pendingLoot then
     local p = pendingLoot
@@ -1663,6 +1679,7 @@ local handlers = {
       paused = settings.paused and true or false
     end
     noName(nil)  -- remember the player's name for the check (never saved)
+    G.run("init:seen", noteSeen)
     if ns.BeastsReady then G.run("init:beasts", ns.BeastsReady) end
     local savingAt = settings.savingAt or db.savingAt  -- older versions kept it in the data
     if savingAt and time() - savingAt < 120 then
