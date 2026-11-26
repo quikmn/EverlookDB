@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.9.1 (2026-11-26)
 
 - The window's Status page shows the places you recorded in lately, where your NPCs are and any problems in full, instead of cutting each line off at the window's edge.
 
