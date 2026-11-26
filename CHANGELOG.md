@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.10.0 (2026-11-26)
 
 - The Collector now notes where you got an item when no loot window shows it: bought from which vendor, given by an NPC or when you took a quest, made with a craft or by using another item, or sent by an NPC's mail. Many recipes on EverlookDB.com still say "source unknown", so every upload helps fill them in.
 - What a clam, lockbox or other item from your bags held is counted, and what disenchanting gave.
