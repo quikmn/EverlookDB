@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.10.2 (2026-11-27)
 - Whichever window you click now comes to the front.
 
 ## v0.10.1 (2026-11-26)
