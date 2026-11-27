@@ -1,5 +1,8 @@
 # EverlookDB Collector
 
+## Unreleased
+- Whichever window you click now comes to the front.
+
 ## v0.10.1 (2026-11-26)
 
 - Each upload says when you were last in game, in which region and on which game version, so EverlookDB.com's status page can show the game is up even when nobody scans the auction house. A `/reload` is enough after this update.
