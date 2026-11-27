@@ -39,7 +39,12 @@ LOOT_ITEM_CREATED_SELF, LOOT_ITEM_CREATED_SELF_MULTIPLE = "You create: %s.", "Yo
 MOCK.bag, MOCK.mail, MOCK.targeting = {}, {}, false
 C_Container = {
 	GetContainerItemID = function(_, slot) return MOCK.bag[slot] and MOCK.bag[slot].id end,
-	GetContainerItemInfo = function(_, slot) local b = MOCK.bag[slot]; return b and { hasLoot = b.loot } end,
+	GetContainerItemInfo = function(_, slot)
+		local b = MOCK.bag[slot]
+		return b and { hasLoot = b.loot, isLocked = b.locked, stackCount = b.n, itemID = MOCK.bagIDs and b.id or nil }
+	end,
+	-- bag 0 only; MOCK.bagSlots 0 (the default) keeps the bags unreadable, as before
+	GetContainerNumSlots = function(bag) return bag == 0 and (MOCK.bagSlots or 0) or 0 end,
 	UseContainerItem = function() end,
 	PickupContainerItem = function() end,
 }
@@ -283,6 +288,27 @@ step("reward window: listed currencies, and reward items whose link is still loa
 	check(EverlookDBData.quest[91904].currency == "3402x15", "older API: " .. tostring(EverlookDBData.quest[91904].currency))
 	GetNumRewardCurrencies, GetQuestCurrencyID, GetQuestCurrencyInfo = nil, nil, nil
 	GetNumQuestRewards, GetRewardMoney = function() return 0 end, function() return 0 end
+	MOCK.RunTimers()
+end)
+
+step("reward window on Forever: no GetNumRewardCurrencies, the list by quest id or the offer index by index", function()
+	GetNumRewardCurrencies, GetQuestCurrencyID, GetQuestCurrencyInfo = nil, nil, nil
+	local errsBefore = EverlookDBData.health and EverlookDBData.health.errors or 0
+	C_QuestInfoSystem = { GetQuestRewardCurrencies = function(qid)
+		if qid == 91910 then return { { currencyID = 3402, totalRewardAmount = 12, baseRewardAmount = 10 } } end
+		return {}
+	end }
+	crateWindow(91910)
+	check(EverlookDBData.quest[91910].currency == "3402x12", "C_QuestInfoSystem list: " .. tostring(EverlookDBData.quest[91910].currency))
+	-- nothing by quest id: the offer window, asked until it has no more
+	C_QuestOffer = { GetQuestRewardCurrencyInfo = function(kind, i)
+		if kind == "reward" and i == 1 then return { currencyID = 3402, totalRewardAmount = 10 } end
+		if kind == "reward" and i == 2 then return { currencyID = 2032, totalRewardAmount = MOCK.Secret(5) } end
+	end }
+	crateWindow(91911)
+	check(EverlookDBData.quest[91911].currency == "3402x10", "offer by index: " .. tostring(EverlookDBData.quest[91911].currency))
+	check((EverlookDBData.health and EverlookDBData.health.errors or 0) == errsBefore, "a missing quest currency API was called")
+	C_QuestInfoSystem, C_QuestOffer = nil, nil
 	MOCK.RunTimers()
 end)
 
@@ -828,6 +854,85 @@ step("loot: an item opened from the bags or disenchanted is counted under that i
 	unstubAll()
 end)
 
+step("bag clicks the hooks never see: a clam, a disenchant and an item used, told by the lock and the bags", function()
+	local L = EverlookDBData.loot
+	local got = function(item) return EverlookDBData.got[item] or {} end
+	local push = function(id) MOCK.Fire("CHAT_MSG_LOOT", "You receive item: " .. itemLink(id) .. ".") end
+	MOCK.bagSlots, MOCK.bagIDs = 8, true
+	-- a clam opened with a bag click: the game locks it while its loot shows
+	MOCK.time = MOCK.time + 20
+	MOCK.bag = { { id = 7973, loot = true, locked = true, n = 3 }, { id = 11138, n = 1 } }
+	openLoot({ ["Item-0-0-0-00000B01"] = { 4655 } })
+	check(L["i:7973"] and L["i:7973"].n == 1 and L["i:7973"].i[4655], "locked clam not counted")
+	-- the game told it locked it (ITEM_LOCKED), and it isn't locked any more when the window shows
+	MOCK.time = MOCK.time + 20
+	MOCK.bag[1].locked = false
+	MOCK.Fire("ITEM_LOCKED", 0, 1)
+	openLoot({ ["Item-0-0-0-00000B02"] = { 4655 } })
+	check(L["i:7973"].n == 2, "ITEM_LOCKED clam: " .. L["i:7973"].n)
+	-- a clam used up as its window closes: told by the bag update after it
+	MOCK.time = MOCK.time + 20
+	MOCK.Fire("BAG_UPDATE_DELAYED")
+	stub("GetNumLootItems", function() return 1 end)
+	stub("GetLootSlotLink", function() return "|Hitem:5503:|h[x]|h" end)
+	stub("GetLootSourceInfo", function() return "Item-0-0-0-00000B03", 1 end)
+	stub("IsFishingLoot", function() return false end)
+	stub("GetMoney", function() return 0 end)
+	MOCK.Fire("LOOT_READY"); MOCK.Fire("LOOT_OPENED"); MOCK.Fire("LOOT_CLOSED")
+	check(L["i:7973"].n == 2, "counted before the item was told")
+	MOCK.bag[1].n = 2
+	MOCK.Fire("BAG_UPDATE_DELAYED")
+	check(L["i:7973"].n == 3 and L["i:7973"].i[5503], "clam told by the bags after closing")
+	unstubAll()
+	-- disenchanting with a bag click: the item locked while the cast lasts
+	MOCK.time = MOCK.time + 20
+	MOCK.bag[2].locked = true
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "", "Cast-1", 13262)
+	MOCK.time = MOCK.time + 3
+	MOCK.bag[2] = nil  -- gone when the cast ends
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 13262)
+	openLoot({ ["Item-0-0-0-00000B04"] = { 10940 } })
+	check(L["d:11138"] and L["d:11138"].n == 1 and L["d:11138"].i[10940], "locked disenchant not counted")
+	-- nothing seen locked: the item that left the bags during the cast
+	MOCK.time = MOCK.time + 20
+	MOCK.bag[2] = { id = 15200, n = 1 }
+	MOCK.Fire("UNIT_SPELLCAST_SENT", "player", "", "Cast-2", 13262)
+	MOCK.time = MOCK.time + 3
+	MOCK.bag[2] = nil
+	MOCK.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 13262)
+	openLoot({ ["Item-0-0-0-00000B05"] = { 10938 } })
+	check(L["d:15200"] and L["d:15200"].i[10938] and not L["i:15200"], "disenchant by the bags")
+	-- an item used that makes another: the one that left the bags, if using it does something
+	stub("GetItemSpell", function(id) if id == 6948 or id == 17202 then return "Use", 1 end end)
+	local function settle() MOCK.Fire("BAG_UPDATE_DELAYED"); MOCK.time = MOCK.time + 20; MOCK.Fire("BAG_UPDATE_DELAYED") end
+	MOCK.bag = { { id = 17202, n = 2 }, { id = 2589, n = 5 } }
+	settle()
+	MOCK.bag[1].n = 1
+	push(17197)
+	check(got(17197)["use:17202"] == 1, "item used, told by the bags")
+	-- the line first, the bag update just after: moved from unexplained to the item used
+	settle()
+	push(17198)
+	check(got(17198)["?:1429"] == 1, "unexplained first")
+	MOCK.bag[1] = nil
+	MOCK.Fire("BAG_UPDATE_DELAYED")
+	check(got(17198)["use:17202"] == 1 and not got(17198)["?:1429"], "not moved to the item used")
+	-- cloth handed over (no use) is not an item used
+	settle()
+	MOCK.bag[2].n = 4
+	push(17199)
+	check(got(17199)["?:1429"] == 1 and not got(17199)["use:2589"], "an item with no use taken for one used")
+	-- ITEM_LOCKED on an item that does something
+	MOCK.bag = { { id = 6948, n = 1 } }
+	settle()
+	MOCK.Fire("ITEM_LOCKED", 0, 1)
+	push(17200)
+	check(got(17200)["use:6948"] == 1, "locked item used")
+	MOCK.bag, MOCK.bagSlots, MOCK.bagIDs = {}, 0, nil
+	MOCK.Fire("BAG_UPDATE_DELAYED")
+	unstubAll()
+end)
+
 step("buying from a merchant right after a hand-in is not a quest reward", function()
 	local q = EverlookDBData.quest[91904]
 	stub("GetMerchantNumItems", function() return 0 end)
@@ -1270,6 +1375,15 @@ do
 		{ __index = _G, __newindex = function(_, k, v) _G[k] = v end }))
 	chunk()
 end
+
+step("last saved: every logout or reload, not only Save now", function()
+	EverlookDBSettings.lastSave = os.time() - 10 * 86400
+	MOCK.Fire("PLAYER_LOGOUT")
+	check(os.time() - EverlookDBSettings.lastSave <= 5, "last save not stamped at logout")
+	check(EverlookDBData.lastSave == nil, "the stamp went into the data")
+	MOCK.time = MOCK.time + 1  -- (the status is counted once per frame)
+	check(ns.Status().lastSave == EverlookDBSettings.lastSave, "status shows another time")
+end)
 
 step("seen: login and logout note when and in which region the game last wrote the file", function()
 	-- the mock has no region API: the time is noted, the region left out

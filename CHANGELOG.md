@@ -1,5 +1,11 @@
 # EverlookDB Collector
 
+## Unreleased
+- Quest rewards in currencies (like Merchant's Favor) are recorded again.
+- Opening a clam, lockbox or bag of goods, disenchanting, and items you make by using another item are now recorded when you click them in your bags.
+- "Last saved" in the settings shows your latest logout or reload, not only the last time you pressed Save now.
+- A `/reload` is enough after this update.
+
 ## v0.10.2 (2026-11-27)
 - Whichever window you click now comes to the front.
 

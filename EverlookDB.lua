@@ -112,6 +112,7 @@ local API_NAMES = {
   "UnitExists", "UnitGUID", "UnitName", "UnitLevel", "UnitIsDead", "UnitClassification",
   "C_CurrencyInfo.GetCurrencyListSize", "C_CurrencyInfo.GetCurrencyListInfo", "C_CurrencyInfo.GetCurrencyListLink",
   "GetQuestItemInfo", "GetQuestItemLink", "GetNumRewardCurrencies", "C_QuestOffer.GetQuestRewardCurrencyInfo",
+  "C_QuestInfoSystem.GetQuestRewardCurrencies", "C_QuestLog.GetQuestRewardCurrencies",
   "GetQuestCurrencyID", "GetQuestCurrencyInfo", "GetNumQuestRewards", "GetNumQuestChoices", "GetRewardMoney",
   "C_QuestLog.GetLogIndexForQuestID", "C_QuestLog.GetInfo", "C_QuestLog.GetQuestObjectives", "GetNumQuestItems",
   "GetNumTrainerServices", "GetTrainerServiceInfo", "GetTrainerServiceCost", "GetTrainerServiceLevelReq",
@@ -595,6 +596,92 @@ local lastCast, lastCastAt, lastCastID = nil, 0, nil
 local DISENCHANT = 13262
 -- the item last used or targeted in your bags (a clam opened, an item disenchanted): { id, at, loot = it opens }
 local lastUsed
+-- Forever's bag buttons don't pass through UseContainerItem, so the hooks below rarely see a bag click. The game
+-- itself tells the item: it locks the item it is busy with (ITEM_LOCKED, isLocked in the bags) and the item is gone
+-- from the bags afterwards. B.lastLocked: the latest item the game locked in the bags { id, at, loot, use };
+-- B.castItem: the item locked while Disenchant was cast { id, at }; B.deSnap: the bags when that cast began;
+-- B.bagSnap: the bags as of the last bag update; B.openedLater: a window from an item not told yet, settled by the
+-- item that leaves the bags when it closes { items, snap, at }.
+-- B.lastGone: the one kind of item that left the bags at the latest bag update { id, at, loot }.
+-- B.lastUnexplained: the latest item that came with no explanation { id, way, at }: a bag update just after may
+-- still tell the item used for it. (One table: the main chunk is near Lua's 200 locals.)
+local B = {}
+function B.bagAPI(name)
+  local C = rawget(_G, "C_Container")
+  local f = type(C) == "table" and C[name] or nil
+  if type(f) ~= "function" then f = rawget(_G, name) end
+  return type(f) == "function" and f or nil
+end
+function B.lastBag()
+  return num(rawget(_G, "NUM_TOTAL_EQUIPPED_BAG_SLOTS")) or num(rawget(_G, "NUM_BAG_SLOTS")) or 4
+end
+-- -> item id, the slot's info table (fields the game hides read as nil)
+function B.slotItem(bag, slot)
+  local getInfo, getID = B.bagAPI("GetContainerItemInfo"), B.bagAPI("GetContainerItemID")
+  local info = getInfo and safe(getInfo, bag, slot)
+  info = type(info) == "table" and info or nil
+  local id = info and num(info.itemID)
+  if not id and getID then id = num(safe(getID, bag, slot)) end
+  return id, info
+end
+function B.eachSlot(fn)
+  local size = B.bagAPI("GetContainerNumSlots")
+  if not size then return end
+  for bag = 0, B.lastBag() do
+    for slot = 1, math.min(num(safe(size, bag)) or 0, 64) do
+      if fn(bag, slot) then return end
+    end
+  end
+end
+-- using the item does something: it opens (has loot) or casts a spell
+function B.doesSomething(id, opens)
+  if opens then return true end
+  local get = type(C_Item) == "table" and C_Item.GetItemSpell
+  if type(get) ~= "function" then get = rawget(_G, "GetItemSpell") end
+  if type(get) ~= "function" then return false end
+  local name, spell = safe(get, id)
+  return ok(name) ~= nil or ok(spell) ~= nil
+end
+-- the item the game has locked in your bags -> id, opens. wantLoot: only one that opens (a clam, a lockbox)
+function B.lockedInBags(wantLoot)
+  local found, opens
+  B.eachSlot(function(bag, slot)
+    local id, info = B.slotItem(bag, slot)
+    if id and info and ok(info.isLocked) == true then
+      local o = ok(info.hasLoot) == true
+      if o or not wantLoot then found, opens = id, o; return true end
+    end
+  end)
+  return found, opens
+end
+-- the bags: { n = { [id] = count }, loot = { [id] = true when it opens } }
+function B.bagCounts()
+  local n, loot = {}, {}
+  B.eachSlot(function(bag, slot)
+    local id, info = B.slotItem(bag, slot)
+    if id then
+      n[id] = (n[id] or 0) + (info and num(info.stackCount) or 1)
+      if info and ok(info.hasLoot) == true then loot[id] = true end
+    end
+  end)
+  return { n = n, loot = loot }
+end
+-- the one kind of item there is less of now than in `before` -> id, whether it opens (nil: none, or several kinds)
+function B.goneSince(before, now)
+  if type(before) ~= "table" then return nil end
+  now = now or B.bagCounts()
+  local found
+  for id, c in pairs(before.n) do
+    if (now.n[id] or 0) < c then
+      if found then return nil end
+      found = id
+    end
+  end
+  return found, found ~= nil and before.loot[found] == true
+end
+function B.within(u, secs, now)
+  if type(u) == "table" and now - u.at <= secs then return u end
+end
 local lootOpen, lootClosedAt = false, 0
 local lastObjectName, lastObjectAt = nil, 0
 local looted = seenSet(2000)  -- "kind..guid" already counted this session (the latest few thousand)
@@ -659,20 +746,35 @@ local function readCorpse(id, guid)
   changes = changes + 1
 end
 
--- The item opened from your bags just before this loot window (a clam, a lockbox, a bag of loot), or disenchanted
--- (cast, then the item clicked): -> "i" or "d", its id. Only when nothing in the window comes from a creature or
--- object, and the game names an item as its source or the item said it opens; a potion drunk before looting a
--- corpse whose source is hidden is never taken for it.
+-- The item opened from your bags just before this loot window (a clam, a lockbox, a bag of loot), or disenchanted:
+-- -> "i" or "d", its id. Only when nothing in the window comes from a creature or object, and the game names an
+-- item as its source or the item said it opens; a potion drunk before looting a corpse whose source is hidden is
+-- never taken for it. In order: the item the game locked for it, the item clicked (hooks), the item that left the
+-- bags.
 local function usedFor(itemSource)
-  local u, now = lastUsed, GetTime()
-  if not u then return nil end
+  local now = GetTime()
   -- Disenchant: the item is clicked, then the cast takes 3 seconds
   if lastCastID == DISENCHANT and now - lastCastAt < 3 then
-    if now - u.at < 8 then return "d", u.id end
+    local u = B.within(B.castItem, 8, now) or B.within(lastUsed, 8, now)
+    if u then return "d", u.id end
+    local gone = B.goneSince(B.deSnap)
+    if gone then return "d", gone end
+    local g = B.within(B.lastGone, 4, now)
+    if g then return "d", g.id end
     return nil
   end
-  if now - u.at > (itemSource and 8 or 3) then return nil end
-  if itemSource or u.loot then return "i", u.id end
+  local opened = B.lockedInBags(true)
+  if opened then return "i", opened end
+  local l = B.within(B.lastLocked, 8, now)
+  if l and (l.loot or (itemSource and now - l.at <= 3)) then return "i", l.id end
+  local u = B.within(lastUsed, itemSource and 8 or 3, now)
+  if u and (itemSource or u.loot) then return "i", u.id end
+  if itemSource then
+    local g = B.within(B.lastGone, 3, now)
+    if g then return "i", g.id end
+    local gone = B.goneSince(B.bagSnap)
+    if gone then return "i", gone end
+  end
 end
 
 -- Read the open loot window, counting nothing yet. -> nil when it is empty, else
@@ -737,23 +839,51 @@ local function scanLoot()
     end
     if isItem and not credited and (ours or hidden or fishing) then bad = bad + 1; sig[#sig + 1] = "?" .. (id or 0) end
   end
-  local container
+  local container, unknownItem
   if #order == 0 and not fishing and not (hiddenAny and not itemSource) then
     local kind, from = usedFor(itemSource)
     if kind then
       container = { kind = kind, id = from, items = all }
       bad = loading
       sig[#sig + 1] = kind .. from
+    elseif itemSource and loading == 0 and next(all) then
+      unknownItem = all  -- told when it closes: the item that leaves the bags
     end
   end
   return { sources = sources, order = order, fished = fished, fishing = fishing, bad = bad, sig = table.concat(sig, ","),
-    container = container }
+    container = container, unknownItem = unknownItem }
 end
 
 local function countItems(items)
   local n = 0
   for _ in pairs(items) do n = n + 1 end
   return n
+end
+
+-- one opening of an item from your bags ("i") or one disenchant ("d"), keyed by that item -> its record
+function B.countContainer(kind, id, items)
+  local rec = lootRecord(kind .. ":" .. id)
+  rec.n = rec.n + 1
+  for item, qty in pairs(items) do
+    local it = rec.i[item] or { 0, 0 }
+    it[1], it[2] = it[1] + 1, it[2] + qty
+    rec.i[item] = it
+  end
+  tally("loot"); tally("items", countItems(items))
+  return rec
+end
+
+-- A window from an item that wasn't told when it opened: the one kind of item that left the bags since (a clam
+-- is used up as its window closes). Looked at when the window closes and at each bag update for 5 seconds.
+function B.settleOpened(bagsNow)
+  local o = B.openedLater
+  if not o or lootOpen then return end
+  if GetTime() - o.at > 5 then B.openedLater = nil; return end
+  local gone = B.goneSince(o.snap, bagsNow)
+  if not gone then return end
+  B.openedLater = nil
+  B.countContainer("i", gone, o.items)
+  changes = changes + 1
 end
 
 -- Count a loot window that was read. A window with an item that couldn't be read is left out of the drop counts
@@ -778,19 +908,14 @@ local function countLoot(read)
   if read.container then
     -- an item opened from your bags, or disenchanted: keyed by that item ("i:<id>", "d:<id>"), counted per opening
     local c = read.container
-    lastUsed, lastCast, lastCastID = nil, nil, nil
+    lastUsed, lastCast, lastCastID, B.lastLocked, B.castItem, B.deSnap = nil, nil, nil, nil, nil, nil
     if read.bad > 0 then G.count("lootUnread"); tally("unread"); return end
-    local rec = lootRecord(c.kind .. ":" .. c.id)
-    rec.n = rec.n + 1
-    for item, qty in pairs(c.items) do
-      local it = rec.i[item] or { 0, 0 }
-      it[1], it[2] = it[1] + 1, it[2] + qty
-      rec.i[item] = it
-    end
-    moneySources = { rec }
+    moneySources = { B.countContainer(c.kind, c.id, c.items) }
     moneyBefore = num(safe(GetMoney))
-    tally("loot"); tally("items", countItems(c.items))
     return
+  end
+  if read.unknownItem then
+    B.openedLater = { items = read.unknownItem, snap = B.bagSnap or B.bagCounts(), at = GetTime() }
   end
 
   local map, x, y = where()
@@ -877,6 +1002,7 @@ local function lootClosed()
   local p = pendingLoot
   pendingLoot = nil
   if p then G.run("loot:closing", finishLoot, p.read) end
+  G.run("loot:opened", B.settleOpened)
   local sources, before = moneySources, moneyBefore
   moneySources, moneyBefore, lootDone, lootSig = nil, nil, false, nil
   -- money is credited only when one source was looted, so it can be attributed
@@ -1065,35 +1191,67 @@ local function links(kind, count)
   return #out > 0 and table.concat(out, ",") or nil, missing
 end
 
--- "id x amount" of the currencies the reward window lists (Merchant's Favor: "3402x10")
+-- "id x amount" of the currencies the reward window lists (Merchant's Favor: "3402x10"). Forever has no
+-- GetNumRewardCurrencies: the list comes from C_QuestInfoSystem / C_QuestLog by quest id, else the offer window's
+-- C_QuestOffer.GetQuestRewardCurrencyInfo is asked index by index until it has no more. Only functions the client
+-- has are ever called.
 local MAX_LISTED_CURRENCIES = 8
-local function rewardCurrencies()
+local function rewardCurrencies(qid)
+  local function apiFn(t, name)
+    t = rawget(_G, t)
+    local f = type(t) == "table" and t[name]
+    return type(f) == "function" and f or nil
+  end
+  local function currencyEntry(info)
+    if type(info) ~= "table" then return nil end
+    local id = num(info.currencyID)
+    local amount = num(info.totalRewardAmount) or num(info.baseRewardAmount)
+    if id and amount and id > 0 and amount > 0 then return id .. "x" .. amount end
+  end
   local out = {}
-  for i = 1, math.min(num(safe(GetNumRewardCurrencies)) or 0, MAX_LISTED_CURRENCIES) do
-    local id, amount
-    if C_QuestOffer and C_QuestOffer.GetQuestRewardCurrencyInfo then
-      local info = safe(C_QuestOffer.GetQuestRewardCurrencyInfo, "reward", i)
-      if type(info) == "table" then
-        id, amount = num(info.currencyID), num(info.totalRewardAmount) or num(info.baseRewardAmount)
+  local function fromList(list)
+    if type(list) ~= "table" then return end
+    for i = 1, math.min(#list, MAX_LISTED_CURRENCIES) do
+      local e = currencyEntry(list[i])
+      if e then out[#out + 1] = e end
+    end
+  end
+  local list = apiFn("C_QuestInfoSystem", "GetQuestRewardCurrencies")
+  if list then fromList(safe(list, qid)) end
+  list = apiFn("C_QuestLog", "GetQuestRewardCurrencies")
+  if #out == 0 and list and qid then fromList(safe(list, qid)) end
+  local offer = apiFn("C_QuestOffer", "GetQuestRewardCurrencyInfo")
+  if #out == 0 and offer then
+    for i = 1, MAX_LISTED_CURRENCIES do
+      local info = safe(offer, "reward", i)
+      if type(info) ~= "table" then break end
+      out[#out + 1] = currencyEntry(info)
+    end
+  end
+  -- older clients: a count and per-index calls
+  local count = type(rawget(_G, "GetNumRewardCurrencies")) == "function" and rawget(_G, "GetNumRewardCurrencies")
+  if #out == 0 and count then
+    local getID, getInfo = rawget(_G, "GetQuestCurrencyID"), rawget(_G, "GetQuestCurrencyInfo")
+    for i = 1, math.min(num(safe(count)) or 0, MAX_LISTED_CURRENCIES) do
+      local id = type(getID) == "function" and num(safe(getID, "reward", i)) or nil
+      local amount
+      if type(getInfo) == "function" then
+        local _, _, n = safe(getInfo, "reward", i)
+        amount = num(n)
       end
+      if id and amount and id > 0 and amount > 0 then out[#out + 1] = id .. "x" .. amount end
     end
-    if not id and GetQuestCurrencyID then id = num(safe(GetQuestCurrencyID, "reward", i)) end
-    if not amount and GetQuestCurrencyInfo then
-      local _, _, n = safe(GetQuestCurrencyInfo, "reward", i)
-      amount = num(n)
-    end
-    if id and amount and id > 0 and amount > 0 then out[#out + 1] = id .. "x" .. amount end
   end
   return #out > 0 and table.concat(out, ",") or nil
 end
 
 -- what the window lists; true when a reward item was still loading (read again a moment later)
-local function readRewards(q)
+local function readRewards(q, qid)
   local reward, m1 = links("reward", safe(GetNumQuestRewards))
   local choice, m2 = links("choice", safe(GetNumQuestChoices))
   q.reward = reward or q.reward
   q.choice = choice or q.choice
-  q.currency = rewardCurrencies() or q.currency
+  q.currency = rewardCurrencies(qid) or q.currency
   local money = num(safe(GetRewardMoney))
   if money and money > 0 then q.money = money end
   return m1 or m2
@@ -1111,7 +1269,7 @@ local function questDetail(startItem)
   -- the lowest player level that was offered this quest approximates its required level
   local lvl = ok(UnitLevel("player"))
   if lvl then q.offeredAt = math.min(q.offeredAt or lvl, lvl) end
-  readRewards(q)
+  readRewards(q, qid)
 end
 
 -- objective lines that say what to do ("item|1|" with no text is one that never finished loading)
@@ -1202,9 +1360,9 @@ local function questComplete()
   q.to = questParty() or q.to
   local map, x, y = where()
   if map and x then q.toAt = map .. ":" .. x .. ":" .. y end
-  if readRewards(q) then
+  if readRewards(q, qid) then
     C_Timer.After(0.5, G.wrap("timer:quest", function()
-      if not paused and ok(GetQuestID()) == qid then readRewards(q) end
+      if not paused and ok(GetQuestID()) == qid then readRewards(q, qid) end
     end))
   end
 end
@@ -1340,6 +1498,20 @@ local function noteGot(item, way)
 end
 ns.NoteGot = noteGot
 
+-- The item used just before `id` arrived (a bag of goods opened, an item that makes another): the item clicked
+-- (hooks), the item the game locked for it, or the one that left the bags. Only an item that does something when
+-- used: one that opens, or has a use spell.
+function B.usedBefore(id, now)
+  local u = B.within(lastUsed, 3, now)
+  if u and u.id ~= id then return u.id end
+  local l = B.within(B.lastLocked, 3, now)
+  if l and l.use and l.id ~= id then return l.id end
+  local g = B.within(B.lastGone, 3, now)
+  if g and g.id ~= id and B.doesSomething(g.id, g.loot) then return g.id end
+  local gone, opens = B.goneSince(B.bagSnap)
+  if gone and gone ~= id and B.doesSomething(gone, opens) then return gone end
+end
+
 -- the "You receive item" line, with what is going on now
 local function arrived(id)
   if paused or not id then return end
@@ -1354,8 +1526,11 @@ local function arrived(id)
   if (questOpen and now - questOpen < 120) or (watch and now <= watch.ends) then return end  -- a hand-in: quest.got
   if lastAccepted and now - lastAccepted.at < 3 then return noteGot(id, "qa:" .. lastAccepted.q) end
   if gossipNpc then return noteGot(id, "g:" .. gossipNpc) end
-  if lastUsed and now - lastUsed.at < 3 and lastUsed.id ~= id then return noteGot(id, "use:" .. lastUsed.id) end
-  noteGot(id, "?:" .. (where() or 0))
+  local used = B.usedBefore(id, now)
+  if used then return noteGot(id, "use:" .. used) end
+  local way = "?:" .. (where() or 0)
+  noteGot(id, way)
+  B.lastUnexplained = { id = id, way = way, at = now }
 end
 
 -- "You create: [x]": the spell cast just before made it
@@ -1398,6 +1573,50 @@ end
 local function pickedUp(bag, slot)
   -- a spell waiting for its item (Disenchant, Pick Lock): the item clicked is its target
   if SpellIsTargeting and safe(SpellIsTargeting) then usedItem(bag, slot) end
+end
+-- ITEM_LOCKED (bag, slot): the game took an item in your bags for something (used, opened, a spell's target)
+function B.itemLocked(bag, slot)
+  bag, slot = num(bag), num(slot)
+  if paused or not bag or not slot or bag < 0 or bag > B.lastBag() then return end
+  local id, info = B.slotItem(bag, slot)
+  if not id then return end
+  local opens = info ~= nil and ok(info.hasLoot) == true
+  B.lastLocked = { id = id, at = GetTime(), loot = opens, use = B.doesSomething(id, opens) }
+end
+-- Disenchant begins (UNIT_SPELLCAST_SENT / START) or ends (SUCCEEDED): the item it's on is the one the game locked
+function B.disenchantCast(unit, spellID, first)
+  if paused or unit ~= "player" or num(spellID) ~= DISENCHANT then return end
+  local now = GetTime()
+  if first then B.deSnap = B.bagCounts() end
+  if first or not B.within(B.castItem, 8, now) then
+    local id = B.lockedInBags(false)
+    if not id then
+      local l = B.within(B.lastLocked, 3, now)
+      id = l and l.id
+    end
+    if id then B.castItem = { id = id, at = now } elseif first then B.castItem = nil end
+  end
+end
+-- BAG_UPDATE_DELAYED: what left the bags; an item that came just before with no explanation gets the item used
+-- for it; a window from an unknown item is settled
+function B.bagsChanged()
+  if paused then return end
+  local now, before = B.bagCounts(), B.bagSnap
+  B.bagSnap = now
+  local t = GetTime()
+  local gone, opens = B.goneSince(before, now)
+  if gone and not (merchantOpen or mailOpen or tradeOpen) then B.lastGone = { id = gone, at = t, loot = opens } end
+  B.settleOpened(now)
+  local u = B.lastUnexplained
+  if u and gone and t - u.at <= 2 and gone ~= u.id and B.doesSomething(gone, opens) and db and type(db.got) == "table" then
+    B.lastUnexplained = nil
+    local g = db.got[u.id]
+    if type(g) == "table" and tonumber(g[u.way]) then
+      g[u.way] = g[u.way] - 1
+      if g[u.way] <= 0 then g[u.way] = nil end
+    end
+    noteGot(u.id, "use:" .. gone)
+  end
 end
 local function boughtItem(index)
   if paused then return end
@@ -1698,11 +1917,16 @@ local handlers = {
     pendingLoot, lootDone, lootSig, moneySources, moneyBefore = nil, false, nil, nil, nil
     merchantOpen, lastCast, lastObjectName = false, nil, nil
     lootOpen, gossipNpc, mailOpen, tradeOpen, questOpen, lastUsed, lastAccepted = false, nil, false, false, nil, nil, nil
+    B.lastLocked, B.castItem, B.deSnap, B.openedLater, B.lastGone, B.lastUnexplained = nil, nil, nil, nil, nil, nil
     ns.PlaceChanged()
     C_Timer.After(5, G.wrap("timer:questlog", sweepQuestLog))
   end,
   ZONE_CHANGED_NEW_AREA = function() ns.PlaceChanged() end,
-  PLAYER_LOGOUT = function() beforeSave() end,
+  -- the game writes the file right after this (logout, reload, quit): that is the last save
+  PLAYER_LOGOUT = function()
+    if settings then settings.lastSave = time() end
+    beforeSave()
+  end,
   UPDATE_MOUSEOVER_UNIT = function() readUnit("mouseover", isNear("mouseover")) end,
   -- a unit whose GUID was hidden in combat: try once more now that combat is over
   PLAYER_REGEN_ENABLED = function()
@@ -1718,7 +1942,12 @@ local handlers = {
     if unit ~= "player" then return end
     lastCastID = num(spellID)
     lastCast, lastCastAt = lastCastID and spellName(lastCastID), GetTime()
+    B.disenchantCast(unit, spellID, false)
   end,
+  UNIT_SPELLCAST_SENT = function(unit, _, _, spellID) B.disenchantCast(unit, spellID, true) end,
+  UNIT_SPELLCAST_START = function(unit, _, spellID) B.disenchantCast(unit, spellID, false) end,
+  ITEM_LOCKED = B.itemLocked,
+  BAG_UPDATE_DELAYED = B.bagsChanged,
   LOOT_READY = function() lootOpen = true; readLoot() end,
   LOOT_OPENED = function() lootOpen = true; readLoot() end,
   LOOT_CLOSED = lootClosed,
