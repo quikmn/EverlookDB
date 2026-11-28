@@ -350,22 +350,28 @@ local spotRecent = recentSet(5000, 300, true)
 
 -- add a position to rec.p[map] as a grid cell "x:y" -> times seen (each spawn once a session when guid is given)
 -- field: "p" (default) or "pa", approximate spots (within about 28 yards), counted apart from the exact ones
+-- or "pf", seen from afar (a nameplate further off than that): the player's spot on a 1% grid, for NPCs nobody
+-- went near; each kind is counted apart, so a far sighting never stops a closer one from counting later
 local approxCounted = seenSet(5000)
 local approxRecent = recentSet(5000, 300, true)
+local FAR = { counted = seenSet(5000), recent = recentSet(5000, 300, true), grid = 10 }
 local function addSpot(rec, map, x, y, guid, id, field)
   if not map then return end
   field = field or "p"
+  local grid = field == "pf" and FAR.grid or SPAWN_GRID
   if guid then
-    local fallback = (id or 0) .. "@" .. map .. ":" .. cell(x, y, SPAWN_GRID)
+    local fallback = (id or 0) .. "@" .. map .. ":" .. cell(x, y, grid)
     if field == "pa" then
       if not firstSight(approxCounted, approxRecent, guid, fallback) then return end
+    elseif field == "pf" then
+      if not firstSight(FAR.counted, FAR.recent, guid, fallback) then return end
     elseif not firstSight(spotCounted, spotRecent, guid, fallback) then return end
   end
   rec[field] = rec[field] or {}
   local cells = rec[field][map]
   if not cells then cells = { n = 0 }; rec[field][map] = cells end
   if not x then cells.n = cells.n + 1; changes = changes + 1; return end  -- seen on this map, position unknown (instance)
-  local key = math.floor(x / SPAWN_GRID) * SPAWN_GRID .. ":" .. math.floor(y / SPAWN_GRID) * SPAWN_GRID
+  local key = math.floor(x / grid) * grid .. ":" .. math.floor(y / grid) * grid
   if cells[key] then
     cells[key] = cells[key] + 1
     changes = changes + 1
@@ -457,8 +463,9 @@ ns.IsLevelLine = isLevelLine
 
 -- here: { map, x, y } from where(), when the caller already has it (the nameplate scan reads it once a tick)
 -- near: true within about 10 yards (an exact spot), "close" within about 28 (an approximate spot, rec.pa)
+-- plate: read from a nameplate, so within nameplate range even when not near (a spot seen from afar, rec.pf)
 local idHidden = false  -- the last unit read had a hidden GUID (dungeons): read it again after combat
-local function readUnit(unit, near, here)
+local function readUnit(unit, near, here, plate)
   if paused or not usable(unit) then return end
   if not ok(UnitExists(unit)) or ok(UnitIsPlayer(unit)) then return end
   if ok(UnitPlayerControlled(unit)) then return end  -- pets and guardians
@@ -549,6 +556,9 @@ local function readUnit(unit, near, here)
   elseif near == "close" and guid and here[2] and not hasCells(rec.p, here[1]) then
     -- no exact spot on this map yet: the player's spot within about 28 yards, kept apart as approximate
     addSpot(rec, here[1], here[2], here[3], guid, id, "pa")
+  elseif plate and guid and here[2] and FAR.ok() and not hasCells(rec.p, here[1]) and not hasCells(rec.pa, here[1]) then
+    -- only a nameplate away (most NPCs players pass but never walk up to): where the player stood, kept apart as far
+    addSpot(rec, here[1], here[2], here[3], guid, id, "pf")
   end
   return rec, id
 end
@@ -560,6 +570,19 @@ local function isNear(unit)
   if safe(CheckInteractDistance, unit, NEAR) == true then return true end
   if safe(CheckInteractDistance, unit, CLOSE) == true then return "close" end
   return false
+end
+
+-- Far spots only while nameplates reach no further than the game's own default limit (41 yards): with a longer
+-- range set, where the player stands says too little about where the NPC is. Read once a minute.
+FAR.max, FAR.readAt = nil, -60
+function FAR.ok()
+  local now = GetTime()
+  if now - FAR.readAt > 60 then
+    FAR.readAt = now
+    local get = (C_CVar and C_CVar.GetCVar) or GetCVar
+    FAR.max = tonumber(safe(get, "nameplateMaxDistance") or "") or 41
+  end
+  return FAR.max <= 41
 end
 
 local function scanNameplates()
@@ -576,7 +599,7 @@ local function scanNameplates()
     if not isSecret(unit) and unit == nil then unit = plate.UnitFrame and plate.UnitFrame.unit end
     if usable(unit) then  -- dungeon nameplates hand out secret tokens: those are skipped
       here = here or { where() }
-      readUnit(unit, isNear(unit), here)
+      readUnit(unit, isNear(unit), here, true)
     end
   end
 end

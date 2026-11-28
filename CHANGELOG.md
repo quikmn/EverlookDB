@@ -1,5 +1,9 @@
 # EverlookDB Collector
 
+## Unreleased
+- NPCs you only see from a distance (their nameplate shows, but you never walk up to them) now get a rough spot on the map, so EverlookDB.com can show where they are. A closer sighting always replaces it.
+- A `/reload` is enough after this update.
+
 ## v0.10.3 (2026-11-27)
 - Quest rewards in currencies (like Merchant's Favor) are recorded again.
 - Opening a clam, lockbox or bag of goods, disenchanting, and items you make by using another item are now recorded when you click them in your bags.

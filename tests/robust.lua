@@ -479,7 +479,8 @@ step("positions: a creature you only fought (never close out of combat, never lo
 	EverlookDBData.npc[4180] = nil
 	tick(2)
 	local n = EverlookDBData.npc[4180]
-	check(n and n.p == nil and n.pa == nil and ns.Care.Located(n) == "zone", "placed before the fight")
+	check(n and n.p == nil and n.pa == nil and n.pf and n.pf[1429]["400:600"] == 1, "seen from afar before the fight")
+	check(ns.Care.Located(n) == "approx" and ns.Care.Gaps(EverlookDBData).far >= 1, "a far spot counts as rough")
 	MOCK.Fire("CHAT_MSG_COMBAT_XP_GAIN", "Distant Caster dies, you gain 40 experience.")
 	check(n.pa and n.pa[1429] and n.pa[1429]["400:600"] == 1 and n.xp == nil, "no rough spot from the kill")
 	MOCK.Fire("CHAT_MSG_COMBAT_XP_GAIN", "Distant Caster dies, you gain 40 experience.")

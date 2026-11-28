@@ -17,7 +17,7 @@
 --                   mended at login), localeChanged, compacted, questFromLog
 --   noEvent         game events the client refused to register
 --   Written just before the game saves the file (logout or reload, EverlookDB.lua beforeSave):
---   gaps            how complete the file is: npcs, noName, noLevel, exact / approx / inst / zoneOnly / noLoc (where
+--   gaps            how complete the file is: npcs, noName, noLevel, exact / approx (far: of those, seen from afar only) / inst / zoneOnly / noLoc (where
 --                   each NPC is known to be), loot, lootNoName, objs, objNoName, quests, questNoGiver, ... (Care.lua)
 --   rec             the addon's own row counts (npc, loot, looted, obj, vendor, quest, trainer): the site compares
 --                   them with what it could read, so rows lost on the way are noticed

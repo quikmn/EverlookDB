@@ -167,8 +167,8 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Gaps
 
--- Where an NPC is known to be: "exact" (a spot on a zone map), "approx" (a rough spot), "inst" (a dungeon),
--- "zone" (only which zone), or nil
+-- Where an NPC is known to be: "exact" (a spot on a zone map), "approx" (a rough spot: within about 28 yards, or
+-- seen from afar), "inst" (a dungeon), "zone" (only which zone), or nil
 local function hasCell(p)
   if type(p) ~= "table" then return false end
   for _, cells in pairs(p) do
@@ -180,7 +180,7 @@ local function hasCell(p)
 end
 function Care.Located(rec)
   if hasCell(rec.p) then return "exact" end
-  if hasCell(rec.pa) then return "approx" end
+  if hasCell(rec.pa) or hasCell(rec.pf) then return "approx" end
   if (type(rec.zi) == "table" and next(rec.zi)) or (type(rec.p) == "table" and next(rec.p)) then return "inst" end
   if type(rec.z) == "table" and next(rec.z) then return "zone" end
   return nil
@@ -188,7 +188,7 @@ end
 
 -- Counts only: how complete the file is. Saved as health.gaps.
 function Care.Gaps(data)
-  local g = { npcs = 0, noName = 0, noLevel = 0, exact = 0, approx = 0, inst = 0, zoneOnly = 0, noLoc = 0,
+  local g = { npcs = 0, noName = 0, noLevel = 0, exact = 0, approx = 0, far = 0, inst = 0, zoneOnly = 0, noLoc = 0,
     loot = 0, lootNoName = 0, objs = 0, objNoName = 0, quests = 0, questNoGiver = 0, questNoTitle = 0,
     vendors = 0, vendorNoSpot = 0 }
   for _, rec in pairs(data.npc or {}) do
@@ -197,7 +197,9 @@ function Care.Gaps(data)
     if not rec.lo and not rec.boss then g.noLevel = g.noLevel + 1 end
     local l = Care.Located(rec)
     if l == "exact" then g.exact = g.exact + 1
-    elseif l == "approx" then g.approx = g.approx + 1
+    elseif l == "approx" then
+      g.approx = g.approx + 1
+      if not hasCell(rec.pa) then g.far = g.far + 1 end  -- of those, seen from afar only
     elseif l == "inst" then g.inst = g.inst + 1
     elseif l == "zone" then g.zoneOnly = g.zoneOnly + 1
     else g.noLoc = g.noLoc + 1 end
@@ -291,7 +293,7 @@ local STAGES = {
     local did = false
     for _, name in ipairs({ "npc", "obj" }) do
       for _, rec in pairs(d[name]) do
-        for _, f in ipairs({ "p", "pa" }) do
+        for _, f in ipairs({ "p", "pa", "pf" }) do
           for map, cells in pairs(type(rec[f]) == "table" and rec[f] or {}) do
             local count = 0
             if type(cells) == "table" then for _ in pairs(cells) do count = count + 1 end end
