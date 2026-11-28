@@ -1,6 +1,6 @@
 # EverlookDB Collector
 
-## Unreleased
+## v0.11.0 (2026-11-28)
 - NPCs you only see from a distance (their nameplate shows, but you never walk up to them) now get a rough spot on the map, so EverlookDB.com can show where they are. A closer sighting always replaces it.
 - A `/reload` is enough after this update.
 
